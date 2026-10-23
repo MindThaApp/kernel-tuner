@@ -89,3 +89,11 @@ lint/tmp/
 signing.properties
 *.keystore
 *.jks
+
+# Local keys/secrets (keys live outside the repo; keep these ignored anyway)
+keystore.properties
+signing.properties
+*.jks
+*.keystore
+*.p12
+*.pem

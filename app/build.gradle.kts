@@ -1,19 +1,3 @@
-/*
- * Copyright (c) 2025 Rve <rve27github@gmail.com>
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
 import java.util.Properties
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
@@ -23,56 +7,37 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
 }
 
+// Signing values come from a properties file kept OUTSIDE the repository.
+// Pass -PktSigning=/path/to/signing.properties, or set KT_SIGNING.
+val signingFile: File? = (findProperty("ktSigning") as String? ?: System.getenv("KT_SIGNING"))
+    ?.let { File(it) }?.takeIf { it.exists() }
+val signingProps = Properties().apply { signingFile?.inputStream()?.use { load(it) } }
+
 android {
-    namespace = "com.rve.rvkernelmanager"
+    namespace = "app.kerneltuner"
     compileSdk = 36
-    buildToolsVersion = "36.1.0"
-    ndkVersion = "29.0.14206865"
 
     signingConfigs {
-        create("release") {
-            val propertiesFile = rootProject.file("signing.properties")
-            val properties = if (propertiesFile.exists()) {
-                Properties().apply {
-                    load(propertiesFile.inputStream())
-                }
-            } else {
-                null
+        if (signingFile != null) {
+            create("release") {
+                storeFile = File(signingProps.getProperty("storeFile"))
+                storePassword = signingProps.getProperty("storePassword")
+                keyAlias = signingProps.getProperty("keyAlias")
+                keyPassword = signingProps.getProperty("keyPassword")
             }
-
-            val getString: (String, String, String) -> String? = { propertyName, environmentName, prompt ->
-                properties?.getProperty(propertyName) ?: System.getenv(environmentName)
-                    ?: System.console()?.readLine("\n$prompt: ")
-            }
-
-            storeFile = getString("storeFile", "STORE_FILE", "Store file")?.let { rootProject.file(it) }
-            storePassword = getString("storePassword", "STORE_PASSWORD", "Store password")
-            keyAlias = getString("keyAlias", "KEY_ALIAS", "Key alias")
-            keyPassword = getString("keyPassword", "KEY_PASSWORD", "Key password")
         }
     }
 
     defaultConfig {
-        applicationId = "com.rve.rvkernelmanager"
+        applicationId = "app.kerneltuner"
         minSdk = 31
-        targetSdk = 36
-        versionCode = 131
-        versionName = "1.3.1"
-
-        vectorDrawables {
-            useSupportLibrary = true
-        }
-
-        ndk {
-            //noinspection ChromeOsAbiSupport
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
-        }
+        targetSdk = 35
+        versionCode = 1
+        versionName = "0.1.0"
     }
 
     dependenciesInfo {
-        // Disables dependency metadata when building APKs (for IzzyOnDroid/F-Droid)
         includeInApk = false
-        // Disables dependency metadata when building Android App Bundles (for Google Play)
         includeInBundle = false
     }
 
@@ -87,21 +52,7 @@ android {
             isShrinkResources = true
             isDebuggable = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.getByName("release")
-            buildConfigField("Boolean", "ENABLE_BETA_FEATURES", "false")
-        }
-
-        debug {
-            isDebuggable = true
-            buildConfigField("Boolean", "ENABLE_BETA_FEATURES", "false")
-        }
-
-        create("beta") {
-            initWith(getByName("debug"))
-            isDebuggable = true
-            applicationIdSuffix = ".beta"
-            versionNameSuffix = "-beta"
-            buildConfigField("Boolean", "ENABLE_BETA_FEATURES", "true")
+            signingConfigs.findByName("release")?.let { signingConfig = it }
         }
     }
 
@@ -111,33 +62,13 @@ android {
     }
 
     packaging {
-        jniLibs {
-            useLegacyPackaging = true
-        }
-
-        dex {
-            useLegacyPackaging = true
-        }
-
         resources {
-            excludes += setOf(
-                "DebugProbesKt.bin",
-                "META-INF/androidx/annotation/annotation/LICENSE.txt",
-                "META-INF/androidx/collection/collection/LICENSE.txt",
-                "META-INF/androidx/collection/collection-ktx/LICENSE.txt",
-                "META-INF/androidx/emoji2/emoji2/LICENSE.txt",
-                "META-INF/androidx/lifecycle/lifecycle-common/LICENSE.txt",
-                "META-INF/androidx/lifecycle/lifecycle-common-java8/LICENSE.txt",
-            )
+            excludes += setOf("DebugProbesKt.bin", "META-INF/androidx/**", "META-INF/*.version")
         }
     }
 
-    lint {
-        baseline = file("lint-baseline.xml")
-        disable += listOf(
-            "ChromeOsAbiSupport",
-            "ObsoleteSdkInt",
-        )
+    testOptions {
+        unitTests.isReturnDefaultValues = true
     }
 }
 
@@ -148,33 +79,17 @@ kotlin {
 }
 
 dependencies {
-    debugImplementation(libs.junit)
-    debugImplementation(libs.androidx.junit)
-    debugImplementation(libs.androidx.espresso.core)
-    implementation(libs.androidx.activity.compose)
     implementation(platform(libs.androidx.compose.bom))
-    implementation(libs.androidx.compose.animation)
-    implementation(libs.androidx.compose.material3)
-    implementation(libs.androidx.compose.material.icons.extended)
-    implementation(libs.androidx.compose.ui)
-    implementation(libs.androidx.compose.ui.graphics)
-    implementation(libs.androidx.compose.ui.tooling)
-    implementation(libs.androidx.compose.ui.tooling.preview)
-    debugImplementation(libs.androidx.compose.test.manifest)
-    debugImplementation(libs.androidx.compose.test.junit4)
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.ui:ui")
+    implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.core.ktx)
-    implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
-
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.serialization.json)
-
-    implementation(libs.io.coil.kt.coil3.compose)
-    implementation(libs.io.coil.kt.coil3.network.okhttp)
-
     implementation(libs.topjohnwu.libsu.core)
 
-    implementation(libs.composables.icons.material.symbols.rounded.filled)
+    testImplementation(libs.junit)
 }

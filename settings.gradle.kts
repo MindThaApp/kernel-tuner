@@ -13,8 +13,12 @@ dependencyResolutionManagement {
   repositories {
     google()
     mavenCentral()
-    maven { setUrl("https://jitpack.io") }
+    maven {
+      setUrl("https://jitpack.io")
+      content { includeGroupByRegex("com\\.github\\.topjohnwu.*") }
+    }
   }
 }
 
+rootProject.name = "KernelTuner"
 include(":app")
