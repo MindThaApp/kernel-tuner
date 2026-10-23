@@ -38,7 +38,9 @@ import java.util.UUID
 
 data class CoreInfo(val cpu: Int, val online: Boolean, val khz: Int?)
 data class ClusterLive(val label: String, val governor: String?, val minKhz: Int?, val maxKhz: Int?)
+data class BatteryInfo(val pct: Int, val charging: Boolean, val full: Boolean, val tempC: Double?, val voltageMv: Int?)
 data class Dash(
+    val battery: BatteryInfo?,
     val cores: List<CoreInfo>,
     val clusters: List<ClusterLive>,
     val gpu: GpuState?,
@@ -72,6 +74,7 @@ class MainViewModel(private val app: Application) : AndroidViewModel(app) {
     /** Opted-in memory overrides: key -> value. Empty means the ROM's values are left alone. */
     val memOverrides = mutableStateMapOf<String, Long>()
     var memText = mutableStateMapOf<String, String>()
+    var activeRecord by mutableStateOf<app.kerneltuner.core.ActiveRecord?>(null); private set
     var nowMs by mutableStateOf(System.currentTimeMillis())
 
     fun init() {
@@ -103,6 +106,7 @@ class MainViewModel(private val app: Application) : AndroidViewModel(app) {
         test = TestMode.pending(app)
         notice = store.notice
         crashLog = store.crashLog()
+        activeRecord = store.active
         memValues = h.memItems.mapNotNull { m ->
             val v = if (m.path != null) fs.read(m.path) else readProp(m.prop!!)
             v?.let { m.key to it }
@@ -134,8 +138,26 @@ class MainViewModel(private val app: Application) : AndroidViewModel(app) {
         }
         val temps = h.thermal.mapNotNull { z -> ThermalDetector.parseTempC(fs.read("${z.path}/temp"))?.let { z to it } }
         val z = Memory.parseZramRatio(fs.read("/sys/block/zram0/mm_stat"))
-        dash = Dash(cores, cl, h.gpu?.let { GpuDetector.readState(fs, it) }, temps, Memory.parseMeminfo(fs.read("/proc/meminfo")), z)
+        dash = Dash(readBattery(), cores, cl, h.gpu?.let { GpuDetector.readState(fs, it) }, temps, Memory.parseMeminfo(fs.read("/proc/meminfo")), z)
     }
+
+    private fun readBattery(): BatteryInfo? = try {
+        val i = app.registerReceiver(null, android.content.IntentFilter(android.content.Intent.ACTION_BATTERY_CHANGED))
+        if (i == null) null else {
+            val lvl = i.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1)
+            val scale = i.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, 100)
+            val st = i.getIntExtra(android.os.BatteryManager.EXTRA_STATUS, -1)
+            val t = i.getIntExtra(android.os.BatteryManager.EXTRA_TEMPERATURE, Int.MIN_VALUE)
+            val v = i.getIntExtra(android.os.BatteryManager.EXTRA_VOLTAGE, 0)
+            if (lvl < 0 || scale <= 0) null else BatteryInfo(
+                lvl * 100 / scale,
+                st == android.os.BatteryManager.BATTERY_STATUS_CHARGING,
+                st == android.os.BatteryManager.BATTERY_STATUS_FULL,
+                if (t == Int.MIN_VALUE) null else t / 10.0,
+                v.takeIf { it > 0 },
+            )
+        }
+    } catch (e: Exception) { null }
 
     fun tick() {
         nowMs = System.currentTimeMillis()
@@ -164,6 +186,14 @@ class MainViewModel(private val app: Application) : AndroidViewModel(app) {
     fun requestApply(target: Settings, asTest: Boolean, profileId: String? = null) {
         val plan = planFor(target) ?: return
         if (plan.isEmpty) { message = "Nothing to change." + warn(plan); return }
+        if (asTest && !store.testExplained) {
+            confirm = Confirm(
+                "How test mode works",
+                "Your settings are applied now. After $testMinutes minutes everything goes back to the values from boot, unless you tap Keep.\n\n" +
+                    "If the phone freezes or restarts, the changes are gone and nothing is re-applied by itself.\n\nThis is the safest way to try something new.",
+            ) { store.testExplained = true; requestApply(target, true, profileId) }
+            return
+        }
         if (plan.aboveStock.isNotEmpty()) {
             confirm = Confirm(
                 "Above stock limits",
@@ -206,6 +236,9 @@ class MainViewModel(private val app: Application) : AndroidViewModel(app) {
             busy = false
         }
     }
+
+    /** One-tap "reset to stock" for just the given settings. */
+    fun resetToStock(target: Settings) { requestApply(target, false) }
 
     fun updateTestMinutes(m: Int) { testMinutes = m.coerceIn(1, 60); store.testMinutes = testMinutes }
 

@@ -97,8 +97,8 @@ object BootGuard {
 
 fun Profile.settingsSummary(): List<String> {
     val l = ArrayList<String>()
-    for ((k, v) in settings.cpu) l += "$k: ${v.governor ?: ""} ${v.minKhz?.div(1000) ?: "-"}-${v.maxKhz?.div(1000) ?: "-"} MHz".trim()
-    settings.gpu?.let { l += "GPU: ${it.governor ?: ""} ${it.minMhz ?: "-"}-${it.maxMhz ?: "-"} MHz".trim() }
+    for ((k, v) in settings.cpu) l += "$k: ${v.governor ?: ""} ${Fmt.khz(v.minKhz)} - ${Fmt.khz(v.maxKhz)}".trim()
+    settings.gpu?.let { l += "GPU: ${it.governor ?: ""} ${Fmt.mhz(it.minMhz)} - ${Fmt.mhz(it.maxMhz)}".trim() }
     for ((k, v) in settings.io) l += "I/O $k: $v"
     for ((k, v) in settings.mem) l += "$k = $v"
     return l
