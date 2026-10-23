@@ -1,100 +1,58 @@
-<div align="center">
-  <img src="https://raw.githubusercontent.com/Rve27/RvKernel-Manager/main/.github/banner.png" width="100%" alt="Banner">
+# Kernel Tuner
 
-# RvKernel Manager
-</div>
-<p align="center">
-<a href="https://github.com/Rve27/RvKernel-Manager/releases"><img src="https://img.shields.io/github/downloads/Rve27/RvKernel-Manager/total?color=%238B0425&logo=android&logoColor=%23fff&style=for-the-badge" alt="Downloads"></a>
-</p>
-<div align="center">
+A small, hardware-agnostic kernel tuning app for rooted Android devices. One APK adapts at runtime to the
+phone it runs on (tested layouts: Snapdragon 625 / kernel 4.9 with `policyN` cpufreq and Adreno `kgsl`, and
+Exynos 7420 / kernel 3.10 with the legacy per-CPU cpufreq layout and Mali).
 
-<p><strong>Take full control of your device's kernel. Tune performance, battery life, and more!</strong></p>
-<br>
-<p>Unlock the true potential of your Android device with <strong>RvKernel Manager</strong>, a powerful and user-friendly open-source tool for managing your kernel settings. This app provides a clean interface to tweak and monitor a wide range of kernel parameters.</p>
-<br>
-<p>Fine-tune your device for peak performance, maximum battery life, or a perfect balance between the two.</p>
+## Credits and licence
 
-## Download
+Kernel Tuner is a fork of [RvKernel Manager](https://github.com/Rve27/RvKernel-Manager) by Rve and
+contributors. Their history is preserved in this repository (branch `main` is the untouched upstream base).
+The project is licensed under the **GNU General Public License v3.0 or later**; see [LICENSE](LICENSE).
+Root access uses [libsu](https://github.com/topjohnwu/libsu) (Apache-2.0).
 
-[<img src="https://gitlab.com/IzzyOnDroid/repo/-/raw/master/assets/IzzyOnDroid.png" alt="Get it on IzzyOnDroid" height="80">](https://apt.izzysoft.de/fdroid/index/apk/com.rve.rvkernelmanager)
-[<img src="https://raw.githubusercontent.com/andOTP/andOTP/master/assets/badges/get-it-on-github.png" alt="Get it on GitHub" height="80">](https://github.com/Rve27/RvKernel-Manager/releases)
-[<img src="https://www.openapk.net/images/openapk-badge.png" alt="Get it on OpenAPK" height="80">](https://www.openapk.net/rvkernel-manager/com.rve.rvkernelmanager/)
-</div>
+Most of the UI and all of the sysfs layer were rewritten for this fork; only the build setup and licence are
+carried over.
 
-## ✨ Features
+## Features
 
-### 📊 Device Information Dashboard
-Monitor critical device information including CPU model, GPU model, RAM, kernel version, Android version, and more.
+- **Runtime hardware detection** (no device-name tables): CPU clusters from `cpufreq/policyN` or the old
+  `cpuN/cpufreq` layout (frequency table from `scaling_available_frequencies`, else `stats/time_in_state`,
+  else `cpuinfo_min/max`); GPU backends Qualcomm `kgsl` and Samsung Mali (`*.mali`: `clock`, `utilization`,
+  `dvfs_governor`, `dvfs_table`, `dvfs_min_lock`/`dvfs_max_lock`); thermal zones filtered to real sensors;
+  I/O schedulers per block device.
+- **Dashboard**: per-core frequency, governor, GPU clock and load, temperatures, RAM/swap/zram. Polls only
+  while the app is on screen.
+- **Controls**: CPU governor and min/max per cluster, GPU governor and min/max, I/O scheduler.
+- **Memory values** (swappiness, dirty ratios, vfs_cache_pressure, zram, lmk props) are read-only by default;
+  overriding is an explicit per-item opt-in with a warning. zram and lmk values are never writable.
+- **Profiles** with optional "apply on boot" (off by default, one boot profile at most). Everything reverts
+  to stock on reboot unless a profile is applied on boot.
+- **Stability safety**
+  - Test mode: changes above the stock maximum are applied for 3 minutes (configurable), then reverted via
+    `AlarmManager` unless you tap Keep.
+  - Clean-reboot detection: a shutdown/reboot receiver writes a marker; at boot the marker, boot-reason
+    properties and (via root) pstore / `last_kmsg` are checked. After an unclean reboot with non-stock
+    settings active, nothing is applied, the profile is marked unstable, a notification names the settings
+    and offers a one-notch step-down, and the last ~50 lines of the crash log are saved for viewing.
+  - Values are clamped to the detected hardware tables; going above stock requires confirmation.
+- **Lightweight**: no background service, no internet permission, receivers only for boot, shutdown and two
+  one-shot alarms.
 
-### 🔋 Battery Monitoring & Control
-- **Real-time monitoring**: Voltage, temperature, charging level, and deep sleep time
-- **Fast charging control**: Enable/disable for supported devices
-- **Bypass charging mode**: Supported on compatible kernels
-- **Battery health tracking**: Monitor current health and capacity
-- **Thermal configuration**: Manage thermal profiles for optimal performance
+## Building
 
-### ⚡ SoC (System on Chip) Management
-Advanced CPU & GPU control with comprehensive support for:
-- **Multi-cluster CPU support**: Little, Big, and Prime core clusters
-- **Governor selection**: Choose optimal CPU & GPU scheduling policies
-- **Frequency scaling**: Set custom min/max frequencies
-- **GPU tuning**: Power level control, Adreno boost, and throttling settings
+Requires JDK 21 and the Android SDK (platform 36). Keep signing material outside the repository:
 
-### 🛠️ Kernel Parameter Tuning
-Fine-tune kernel settings for optimal performance:
-- **Memory management**: Swappiness, dirty ratio, and ZRAM configuration
-- **ZRAM optimization**: Size allocation and compression algorithm selection
-- **Network tuning**: TCP congestion control algorithm selection
-- **Scheduling**: Kernel task scheduler tuning with BORE scheduler support
-- **Kernel profiles**: Pre-configured profiles (Performance, Balance, Powersave)
-- **CPU tuning**: Uclamp settings for fine-grained CPU performance control
-- **And many more advanced parameters!**
+```
+./gradlew :app:testDebugUnitTest
+./gradlew -PktSigning=/path/to/signing.properties :app:assembleRelease
+```
 
-### 🎨 Material 3 Expressive Design
-- **Modern interface**: Clean, intuitive Material 3 design
-- **Dynamic theming**: Adapts to your system colors
-- **Dark/Light modes**: Full theme support
+`signing.properties` holds `storeFile`, `storePassword`, `keyAlias`, `keyPassword`. Never commit it.
+Unit tests use fixture trees captured read-only from real devices under `app/src/test/resources/fixtures`.
 
-### 🔒 System Integration
-- **WireGuard support**: Monitor WireGuard kernel module status
-- **Real-time monitoring**: CPU usage, uptime, and system metrics
+## Limitations
 
-## 📱 Screenshots (v1.2.5)
-
-<p><img src="fastlane/metadata/android/en-US/images/phoneScreenshots/01.png" width="32%" /> <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/02.png" width="32%" /> <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/03.png" width="32%" />
-<img src="fastlane/metadata/android/en-US/images/phoneScreenshots/04.png" width="32%" /> <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/05.png" width="32%" /> <img src="fastlane/metadata/android/en-US/images/phoneScreenshots/06.png" width="32%" /></p>
-
-## 📋 Requirements
-
-- ⚠️ **ROOT ACCESS REQUIRED** - This app needs root permissions to modify kernel parameters
-- 📱 **Android 12+** - Minimum supported Android version
-- 🔧 **Snapdragon devices** - Currently only compatible with Qualcomm Snapdragon SoCs
-
-## Contributing
-
-Contributions to RvKernel Manager are welcome!  Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on how to contribute.
-
-## Telegram
-
-- [Channel](https://t.me/rveproject)
-- [Group](https://t.me/rve_enterprises)
-
-## Credits
-- RvKernel Manager icon & banner by [Alister Grey](https://t.me/allisterhellground)
-
-## License
-
-    Copyright (C) 2025 Rve
-
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 3 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program.  If not, see <https://www.gnu.org/licenses/>.
+Writes need root and may be overridden by ROM services (thermal engine, PowerHAL). A cluster whose CPUs are
+all offline at detection time is not listed until re-detected. GPU governor writes on Mali use the governor
+index and are verified by read-back.
