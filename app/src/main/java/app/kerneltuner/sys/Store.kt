@@ -88,6 +88,11 @@ class Store(ctx: Context) {
         get() = sp.getInt("test_minutes", 3).coerceIn(1, 60)
         set(v) { sp.edit().putInt("test_minutes", v.coerceIn(1, 60)).apply() }
 
+    /** Whether the one-time "how test mode works" explanation has been shown. */
+    var testExplained: Boolean
+        get() = sp.getBoolean("test_explained", false)
+        set(v) { sp.edit().putBoolean("test_explained", v).apply() }
+
     private fun crashFile() = File(app.filesDir, "crash/last-crash.txt")
 
     fun saveCrashLog(header: String, lines: List<String>) {

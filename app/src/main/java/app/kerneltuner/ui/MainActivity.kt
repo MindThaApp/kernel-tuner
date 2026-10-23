@@ -52,7 +52,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private val TABS = listOf("Dashboard", "Controls", "Memory", "Profiles", "About")
+private val TABS = listOf("Home", "Tune", "Profiles", "Safety", "About")
 
 @Composable
 private fun AppRoot(vm: MainViewModel) {
@@ -79,10 +79,10 @@ private fun AppRoot(vm: MainViewModel) {
             TestBanner(vm)
             NoticeBanner(vm)
             when (tab) {
-                0 -> DashboardScreen(vm)
+                0 -> DashboardScreen(vm) { tab = it }
                 1 -> ControlsScreen(vm)
-                2 -> MemoryScreen(vm)
-                3 -> ProfilesScreen(vm)
+                2 -> ProfilesScreen(vm)
+                3 -> SafetyScreen(vm)
                 else -> AboutScreen(vm)
             }
         }
