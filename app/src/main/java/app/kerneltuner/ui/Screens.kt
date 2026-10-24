@@ -42,6 +42,10 @@ import app.kerneltuner.core.ClusterSetting
 import app.kerneltuner.core.Fmt
 import app.kerneltuner.core.GpuSetting
 import app.kerneltuner.core.Help
+import app.kerneltuner.core.OcInfo
+import app.kerneltuner.core.OcLevel
+import app.kerneltuner.core.Preset
+import app.kerneltuner.hw.TempKind
 import app.kerneltuner.core.Profile
 import app.kerneltuner.core.Settings
 import app.kerneltuner.core.settingsSummary
@@ -208,6 +212,25 @@ fun ControlsScreen(vm: MainViewModel) {
             style = MaterialTheme.typography.bodySmall,
         )
 
+        Section("Quick presets", "Fill in the controls with safe, stock-range values. Nothing is applied yet.") {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Preset.values().forEach { pr ->
+                    OutlinedButton(enabled = vm.stock != null, onClick = { vm.usePreset(pr) }) { Text(pr.title) }
+                }
+            }
+            SettingHeader("What do they do?", Help.presets.subtitle, Help.presets)
+        }
+
+        val anyOc = hw.clusters.any { c -> c.freqs.any { OcInfo.cpuLevel(c, it, vm.stock?.cpu?.get(c.id)?.maxKhz) != OcLevel.STOCK } } ||
+            hw.gpu?.let { g -> g.freqs.any { OcInfo.gpuLevel(g, it.mhz, vm.stock?.gpu?.maxMhz) != OcLevel.STOCK } } == true
+        if (anyOc) {
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    SettingHeader("This kernel has overclock steps", "Steps above stock are marked \"Overclock\". Go up one step at a time and use \"Try for ${vm.testMinutes} min\".", Help.overclock)
+                }
+            }
+        }
+
         hw.clusters.forEach { c ->
             val cs = d.cpu[c.id] ?: ClusterSetting(null, c.hwMinKhz, c.hwMaxKhz)
             val stock = vm.stock?.cpu?.get(c.id)
@@ -227,7 +250,7 @@ fun ControlsScreen(vm: MainViewModel) {
                 NowStock(Fmt.khz(cur?.minKhz), stock?.minKhz?.let { Fmt.khz(it) })
 
                 SettingHeader("Maximum speed", Help.cpuMax.subtitle, Help.cpuMax)
-                FreqSlider("Max", c.freqs, cs.maxKhz ?: c.hwMaxKhz, { Fmt.khz(it) }) { vm.draft = d.copy(cpu = d.cpu + (c.id to cs.copy(maxKhz = it))) }
+                FreqSlider("Max", c.freqs, cs.maxKhz ?: c.hwMaxKhz, { Fmt.khz(it) }, { OcInfo.cpuLevel(c, it, stock?.maxKhz) }) { vm.draft = d.copy(cpu = d.cpu + (c.id to cs.copy(maxKhz = it))) }
                 NowStock(Fmt.khz(cur?.maxKhz), stock?.maxKhz?.let { Fmt.khz(it) })
 
                 if (stock != null) ResetButton(enabled && cur != null && cur != stock) { vm.resetToStock(Settings(cpu = mapOf(c.id to stock))) }
@@ -252,10 +275,40 @@ fun ControlsScreen(vm: MainViewModel) {
                 NowStock(Fmt.mhz(cur?.minMhz), stock?.minMhz?.let { Fmt.mhz(it) })
 
                 SettingHeader("Maximum speed", Help.gpuMax.subtitle, Help.gpuMax)
-                FreqSlider("Max", table, gs.maxMhz ?: g.maxMhz, { Fmt.mhz(it) }) { vm.draft = d.copy(gpu = gs.copy(maxMhz = it)) }
+                FreqSlider("Max", table, gs.maxMhz ?: g.maxMhz, { Fmt.mhz(it) }, { OcInfo.gpuLevel(g, it, stock?.maxMhz) }) { vm.draft = d.copy(gpu = gs.copy(maxMhz = it)) }
                 NowStock(Fmt.mhz(cur?.maxMhz), stock?.maxMhz?.let { Fmt.mhz(it) })
 
                 if (stock != null) ResetButton(enabled && cur != null && cur != stock) { vm.resetToStock(Settings(gpu = stock)) }
+            }
+        }
+
+        if (hw.tempGroups.isNotEmpty()) {
+            Section("Temperature limit", "How warm the phone may get before it slows itself down.") {
+                hw.tempGroups.forEach { tg ->
+                    val stockC = vm.stock?.temp?.get(tg.id) ?: tg.detectedC
+                    val info = if (tg.kind == TempKind.IPA) Help.tempIpa else Help.tempTrips
+                    val top = if (tg.kind == TempKind.TRIPS) minOf(tg.maxC, stockC) else tg.maxC
+                    val lo = minOf(tg.minC, top)
+                    val value = (d.temp[tg.id] ?: vm.current.temp[tg.id] ?: stockC).coerceIn(lo, top)
+                    SettingHeader(tg.label, if (tg.kind == TempKind.IPA) "Lower = cooler and slower sooner. Higher = faster for longer, hotter." else "Lower = slows down earlier, stays cooler. Never above stock.", info)
+                    val warm = value > stockC
+                    Text("Limit: $value \u00B0C" + if (value == stockC) " (stock)" else if (warm) " (hotter than stock)" else " (cooler than stock)",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = if (warm) ocColor(OcLevel.OVERCLOCK) else MaterialTheme.colorScheme.onSurface)
+                    if (top > lo) Slider(
+                        value = value.toFloat(), onValueChange = { vm.draft = d.copy(temp = d.temp + (tg.id to it.toInt().coerceIn(lo, top))) },
+                        valueRange = lo.toFloat()..top.toFloat(), steps = (top - lo - 1).coerceAtLeast(0),
+                    )
+                    val curT = vm.current.temp[tg.id]
+                    NowStock(curT?.let { "$it \u00B0C" } ?: "?", "$stockC \u00B0C")
+                    if (curT != null) ResetButton(enabled && curT != stockC) { vm.resetToStock(Settings(temp = mapOf(tg.id to stockC))) }
+                }
+                Text(
+                    if (hw.tempGroups.any { it.kind == TempKind.IPA })
+                        "Android's power manager changes this value when the power mode changes. Kernel Tuner puts your value back while it is applied."
+                    else "Android's own thermal service may still slow the phone earlier than this limit. That is normal.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
         }
 

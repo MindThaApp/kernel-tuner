@@ -98,8 +98,8 @@ object BootProcessor {
         val prof = decision.apply ?: return
         if (!allowApply) return
         val fs = AppFs()
-        val hw = HardwareDetector.detect(fs)
-        val now = Snapshot.read(fs, hw)
+        val hw = HwProbe.detect(ctx, fs)
+        val now = HwProbe.withStockCache(ctx, Snapshot.read(fs, hw))
         store.stock = StockSnapshot(cur, now)           // boot state before any of our writes is stock
         store.unconfirmed = store.unconfirmed + 1
         val plan = Planner.plan(hw, now, prof.settings, now)

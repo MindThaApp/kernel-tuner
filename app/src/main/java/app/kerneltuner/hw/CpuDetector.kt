@@ -7,7 +7,35 @@ object CpuDetector {
     fun cpuCount(fs: SysFs): Int =
         fs.list(Paths.CPU).count { CPUN.matches(it) }
 
-    fun detect(fs: SysFs): List<CpuCluster> {
+    fun detect(fs: SysFs, cached: List<CpuCluster> = emptyList()): List<CpuCluster> =
+        mergeCached(fs, detectLive(fs), cached)
+
+    /**
+     * A cluster whose cores are all hotplugged off has no cpufreq files, and a partly online one lists only
+     * its online members. Fill both from an earlier detection. The live frequency table always wins.
+     */
+    fun mergeCached(fs: SysFs, live: List<CpuCluster>, cached: List<CpuCluster>): List<CpuCluster> {
+        if (cached.isEmpty()) return live
+        val present = fs.list(Paths.CPU).mapNotNull { CPUN.matchEntire(it)?.groupValues?.get(1)?.toInt() }.toSet()
+        val out = ArrayList<CpuCluster>()
+        val used = HashSet<CpuCluster>()
+        for (c in live) {
+            val hit = cached.firstOrNull { k -> k.layout == CpuLayout.PER_CPU && c.layout == CpuLayout.PER_CPU && k.cpus.any { it in c.cpus } }
+            if (hit == null) { out += c; continue }
+            used += hit
+            val cpus = (c.cpus + hit.cpus.filter { it in present }).distinct().sorted()
+            out += c.copy(id = "cpu${cpus.first()}", cpus = cpus, paths = cpus.map { "${Paths.CPU}/cpu$it/cpufreq" })
+        }
+        for (k in cached) {
+            if (k in used || k.layout != CpuLayout.PER_CPU) continue
+            if (out.any { o -> o.cpus.any { it in k.cpus } }) continue
+            if (k.cpus.none { it in present }) continue
+            out += k
+        }
+        return out.sortedBy { it.cpus.first() }
+    }
+
+    private fun detectLive(fs: SysFs): List<CpuCluster> {
         val policies = fs.list(Paths.CPUFREQ).filter { POLICY.matches(it) }
             .sortedBy { it.removePrefix("policy").toInt() }
         val out = ArrayList<CpuCluster>()
@@ -29,7 +57,11 @@ object CpuDetector {
             val rel = (fs.read("$dir/related_cpus") ?: fs.read("$dir/affected_cpus")).ints().sorted().ifEmpty { listOf(n) }
             groups.getOrPut(rel) { ArrayList() }.add(dir)
         }
-        for ((cpus, dirs) in groups) build(fs, cpus, CpuLayout.PER_CPU, dirs)?.let { out += it }
+        for ((cpus, dirs) in groups) build(fs, cpus, CpuLayout.PER_CPU, dirs)?.let {
+            // Write to every member, including cores that are offline right now (skipped while offline, re-applied later).
+            val all = cpus.filter { n -> n in cpuIds }.map { "${Paths.CPU}/cpu$it/cpufreq" }
+            out += it.copy(paths = (all + dirs).distinct())
+        }
         return out.sortedBy { it.cpus.first() }
     }
 

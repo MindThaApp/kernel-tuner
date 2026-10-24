@@ -54,7 +54,9 @@ object TestMode {
             result = Applier.write(fs, t.revertOps)
         }
         store.test = null
-        val hw = HardwareDetector.detect(fs)
+        store.held = null          // the revert plan put the touched values back to stock
+        Reconcile.cancel(ctx)
+        val hw = HwProbe.detect(ctx, fs)
         val stock = store.stock?.takeIf { it.bootId == store.bootId() }?.settings
         val stillNonStock = stock == null || Planner.diffFromStock(stock, Snapshot.read(fs, hw)).isNotEmpty()
         if (!stillNonStock && result.ok) store.active = null

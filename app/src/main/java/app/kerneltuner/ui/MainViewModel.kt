@@ -23,6 +23,11 @@ import app.kerneltuner.hw.Memory
 import app.kerneltuner.hw.ThermalDetector
 import app.kerneltuner.hw.ThermalZone
 import app.kerneltuner.hw.firstInt
+import app.kerneltuner.hw.readFirst
+import app.kerneltuner.sys.HwProbe
+import app.kerneltuner.sys.Reconcile
+import app.kerneltuner.core.Preset
+import app.kerneltuner.core.Presets
 import app.kerneltuner.sys.AppFs
 import app.kerneltuner.sys.Applier
 import app.kerneltuner.sys.BootProcessor
@@ -81,7 +86,7 @@ class MainViewModel(private val app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.IO) {
             rootOk = Root.available()
             try { BootProcessor.run(app, allowApply = false) } catch (_: Throwable) { }
-            hw = HardwareDetector.detect(fs)
+            hw = HwProbe.detect(app, fs)
             ensureStock()
             reload()
             checkTestExpiry()
@@ -93,7 +98,7 @@ class MainViewModel(private val app: Application) : AndroidViewModel(app) {
         val boot = store.bootId()
         val s = store.stock
         if (s != null && s.bootId == boot) { stock = s.settings; return }
-        val snap = Snapshot.read(fs, h)
+        val snap = HwProbe.withStockCache(app, Snapshot.read(fs, h))
         store.stock = StockSnapshot(boot, snap)
         stock = snap
     }
@@ -101,6 +106,11 @@ class MainViewModel(private val app: Application) : AndroidViewModel(app) {
     fun reload() {
         val h = hw ?: return
         current = Snapshot.read(fs, h)
+        // A cluster that was offline at boot appears later with its default limits; remember those as its stock.
+        stock?.let { st ->
+            val learned = HwProbe.learnLateClusters(app, st, current, store.held?.settings)
+            if (learned !== st) { stock = learned; store.stock = StockSnapshot(store.bootId(), learned) }
+        }
         draft = current
         profiles = store.profiles()
         test = TestMode.pending(app)
@@ -121,7 +131,7 @@ class MainViewModel(private val app: Application) : AndroidViewModel(app) {
     fun refreshOnShow() { if (hw != null) viewModelScope.launch(Dispatchers.IO) { reload() } }
 
     fun redetect() {
-        viewModelScope.launch(Dispatchers.IO) { hw = HardwareDetector.detect(fs); reload() }
+        viewModelScope.launch(Dispatchers.IO) { hw = HwProbe.detect(app, fs, forget = true); reload() }
     }
 
     /** Called by the visible Dashboard only. */
@@ -133,8 +143,8 @@ class MainViewModel(private val app: Application) : AndroidViewModel(app) {
             CoreInfo(n, online, if (online) fs.read("$d/cpufreq/scaling_cur_freq").firstInt() else null)
         }
         val cl = h.clusters.map { c ->
-            ClusterLive(c.label, fs.read("${c.readPath}/scaling_governor"),
-                fs.read("${c.readPath}/scaling_min_freq").firstInt(), fs.read("${c.readPath}/scaling_max_freq").firstInt())
+            ClusterLive(c.label, c.readFirst(fs, "scaling_governor"),
+                c.readFirst(fs, "scaling_min_freq").firstInt(), c.readFirst(fs, "scaling_max_freq").firstInt())
         }
         val temps = h.thermal.mapNotNull { z -> ThermalDetector.parseTempC(fs.read("${z.path}/temp"))?.let { z to it } }
         val z = Memory.parseZramRatio(fs.read("/sys/block/zram0/mm_stat"))
@@ -159,9 +169,15 @@ class MainViewModel(private val app: Application) : AndroidViewModel(app) {
         }
     } catch (e: Exception) { null }
 
+    private var tickCount = 0
+
     fun tick() {
         nowMs = System.currentTimeMillis()
         checkTestExpiry()
+        // Every 5 s while on screen: put back limits the system reset (core came back online, PowerHAL profile change).
+        if (++tickCount % 5 == 0 && !busy && rootOk == true && hw != null && store.held != null) {
+            viewModelScope.launch(Dispatchers.IO) { if (Reconcile.run(app) > 0) reload() }
+        }
     }
 
     private fun checkTestExpiry() {
@@ -180,7 +196,7 @@ class MainViewModel(private val app: Application) : AndroidViewModel(app) {
         return Planner.plan(h, current, target, stockOrCurrent())
     }
 
-    fun draftTarget(): Settings = Settings(draft.cpu, draft.gpu, draft.io, emptyMap())
+    fun draftTarget(): Settings = Settings(draft.cpu, draft.gpu, draft.io, emptyMap(), draft.temp)
 
     /** Entry point for Apply / Test buttons. Above-stock changes are forced into test mode after confirmation. */
     fun requestApply(target: Settings, asTest: Boolean, profileId: String? = null) {
@@ -213,7 +229,8 @@ class MainViewModel(private val app: Application) : AndroidViewModel(app) {
             val r = if (asTest) TestMode.start(app, fs, h, plan, testMinutes, profileId, st)
             else Applier.apply(app, fs, h, plan, if (profileId != null) "PROFILE" else "MANUAL", profileId, st)
             reload()
-            message = (if (r.ok) (if (asTest) "Applied in test mode ($testMinutes min)." else "Applied.") else "Problems: " + r.failed.joinToString("; ")) + warn(plan)
+            message = (if (r.ok) (if (asTest) "Applied in test mode ($testMinutes min)." else "Applied.") else "Problems: " + r.failed.joinToString("; ")) + warn(plan) +
+                (if (r.skipped.isNotEmpty()) " ${r.skipped.joinToString(", ")}: it is applied when the core comes back, while Kernel Tuner keeps running." else "")
             busy = false
         }
     }
@@ -240,12 +257,21 @@ class MainViewModel(private val app: Application) : AndroidViewModel(app) {
     /** One-tap "reset to stock" for just the given settings. */
     fun resetToStock(target: Settings) { requestApply(target, false) }
 
+    /** Fills the Tune controls with a stock-range preset. Nothing is written until the user presses Try or Apply. */
+    fun usePreset(p: Preset) {
+        val h = hw ?: return
+        val st = stock ?: return
+        val t = Presets.build(h, st, p)
+        draft = current.copy(cpu = current.cpu + t.cpu, gpu = t.gpu ?: current.gpu, temp = current.temp + t.temp)
+        message = "${p.title}: review the controls, then press Try."
+    }
+
     fun updateTestMinutes(m: Int) { testMinutes = m.coerceIn(1, 60); store.testMinutes = testMinutes }
 
     // ---- profiles ----
     fun saveProfile(name: String) {
         val mem = memOverrides.toMap()
-        val p = Profile(UUID.randomUUID().toString(), name.ifBlank { "Profile ${profiles.size + 1}" }, Settings(draft.cpu, draft.gpu, draft.io, mem))
+        val p = Profile(UUID.randomUUID().toString(), name.ifBlank { "Profile ${profiles.size + 1}" }, Settings(draft.cpu, draft.gpu, draft.io, mem, draft.temp))
         viewModelScope.launch(Dispatchers.IO) { store.saveProfiles(store.profiles() + p); reload(); message = "Saved \"${p.name}\"." }
     }
 

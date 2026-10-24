@@ -6,7 +6,16 @@ import kotlinx.serialization.Serializable
 data class ClusterSetting(val governor: String? = null, val minKhz: Int? = null, val maxKhz: Int? = null)
 
 @Serializable
-data class GpuSetting(val governor: String? = null, val minMhz: Int? = null, val maxMhz: Int? = null)
+data class GpuSetting(
+    val governor: String? = null,
+    val minMhz: Int? = null,
+    val maxMhz: Int? = null,
+    /**
+     * Kernel-side ceiling when the GPU has one: the Samsung OC node (700/772/852) or the Adreno max_pwrlevel
+     * (as MHz). Read from the device; ignored in targets (the planner derives it from [maxMhz]).
+     */
+    val ceilingMhz: Int? = null,
+)
 
 /** Null/absent fields mean "leave as is". A full snapshot has everything filled. */
 @Serializable
@@ -16,8 +25,10 @@ data class Settings(
     val io: Map<String, String> = emptyMap(),
     /** Only explicitly opted-in memory overrides. */
     val mem: Map<String, Long> = emptyMap(),
+    /** Temperature limits in whole degrees C, by TempGroup id. */
+    val temp: Map<String, Int> = emptyMap(),
 ) {
-    val isEmpty get() = cpu.isEmpty() && gpu == null && io.isEmpty() && mem.isEmpty()
+    val isEmpty get() = cpu.isEmpty() && gpu == null && io.isEmpty() && mem.isEmpty() && temp.isEmpty()
 }
 
 @Serializable
@@ -49,3 +60,7 @@ data class TestState(
     val revertOps: List<app.kerneltuner.hw.WriteOp>,
     val summary: List<String>,
 )
+
+/** What the app keeps enforcing this boot (CPU limits and temperature limits), see Reconciler. */
+@Serializable
+data class HeldState(val bootId: String, val settings: Settings)
