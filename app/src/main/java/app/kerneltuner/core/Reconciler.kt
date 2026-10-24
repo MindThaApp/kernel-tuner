@@ -3,6 +3,8 @@ package app.kerneltuner.core
 import app.kerneltuner.hw.Hardware
 import app.kerneltuner.hw.SysFs
 import app.kerneltuner.hw.WriteOp
+import app.kerneltuner.hw.TempKind
+import app.kerneltuner.hw.TempLimitDetector
 import app.kerneltuner.hw.firstInt
 
 /**
@@ -34,9 +36,10 @@ object Reconciler {
         }
         for ((id, wantC) in held.temp) {
             val g = hw.tempGroups.firstOrNull { it.id == id } ?: continue
+            // Trips and the thermal-engine file are not reset by the system; do not touch them here.
+            if (g.kind == TempKind.TMU || g.kind == TempKind.THERMAL_ENGINE) continue
             for (p in g.paths) {
-                val raw = fs.read(p).firstInt() ?: continue
-                val cur = if (g.milli) Math.round(raw / 1000.0).toInt() else raw
+                val cur = TempLimitDetector.read(fs, g) ?: continue
                 if (cur != wantC) ops += WriteOp(p, (if (g.milli) wantC * 1000 else wantC).toString(), "${g.label} temperature limit")
             }
         }

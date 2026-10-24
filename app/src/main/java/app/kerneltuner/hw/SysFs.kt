@@ -8,6 +8,8 @@ interface SysFs {
     fun read(path: String): String?
     fun list(path: String): List<String>
     fun exists(path: String): Boolean
+    /** Owner-write permission bit of the file, or null when unknown. */
+    fun ownerWritable(path: String): Boolean? = null
 }
 
 /** Plain java.io implementation. [root] lets tests point at a fixture directory. */
@@ -30,6 +32,12 @@ class DiskFs(private val root: File? = null) : SysFs {
         f(path).exists()
     } catch (e: Exception) {
         false
+    }
+
+    override fun ownerWritable(path: String): Boolean? = try {
+        java.nio.file.Files.getPosixFilePermissions(f(path).toPath()).contains(java.nio.file.attribute.PosixFilePermission.OWNER_WRITE)
+    } catch (e: Exception) {
+        null
     }
 }
 

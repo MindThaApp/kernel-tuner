@@ -56,6 +56,16 @@ class AppFs : SysFs {
         return out.joinToString("\n").trim()
     }
 
+    override fun ownerWritable(path: String): Boolean? {
+        direct.ownerWritable(path)?.let { return it }
+        if (Root.known() != true) return null
+        val (ok, out) = Root.runOk("stat -c %a ${q(path)} 2>/dev/null")
+        val mode = out.firstOrNull()?.trim()
+        if (!ok || mode.isNullOrEmpty() || mode.length < 3) return null
+        val owner = mode[mode.length - 3].digitToIntOrNull() ?: return null
+        return owner and 2 != 0
+    }
+
     override fun list(path: String): List<String> {
         val d = direct.list(path)
         if (d.isNotEmpty() || Root.known() != true) return d

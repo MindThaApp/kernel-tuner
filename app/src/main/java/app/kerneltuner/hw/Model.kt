@@ -50,7 +50,7 @@ data class GpuInfo(
 }
 
 /** What a temperature-limit slider controls. */
-enum class TempKind { IPA, TRIPS }
+enum class TempKind { IPA, TRIPS, TMU, THERMAL_ENGINE }
 
 /**
  * One temperature-limit control. IPA: a single node holding the power-budget target in whole degrees.
@@ -67,6 +67,10 @@ data class TempGroup(
     val maxC: Int,
     /** Value the kernel had when detected (used only when no boot snapshot exists). */
     val detectedC: Int,
+    /** False when the node exists but is read-only (kernel without the writable-trip patch). */
+    val writable: Boolean = true,
+    /** TMU: position of the trip (0..4); trips must stay ascending. */
+    val order: Int = 0,
 )
 
 enum class ThermalCategory { CPU, GPU, BATTERY, OTHER }

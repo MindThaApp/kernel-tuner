@@ -31,6 +31,43 @@ data class Plan(
 object Planner {
     private val SAFE_VALUE = Regex("^[A-Za-z0-9_.+\\-]{1,48}$")
 
+    /**
+     * Samsung hardware throttle trips. Each is clamped to stock-20..stock+10, the five stay strictly ascending,
+     * and writes are ordered so the kernel never sees a descending pair: raised trips first (top one first),
+     * then lowered trips (bottom one first). A read-only node means the old kernel: nothing is written.
+     */
+    private fun planTmu(
+        hw: Hardware, current: Settings, target: Settings, stock: Settings,
+        ops: MutableList<WriteOp>, above: MutableList<String>, summary: MutableList<String>, warn: MutableList<String>,
+        afterTemp: MutableMap<String, Int>, touched: MutableSet<String>,
+    ) {
+        val groups = hw.tempGroups.filter { it.kind == TempKind.TMU }.sortedBy { it.order }
+        if (groups.isEmpty() || groups.none { it.id in target.temp }) return
+        if (groups.any { !it.writable }) { warn += "Hardware throttle limits need the updated kernel (the files are read-only)"; return }
+        val want = ArrayList<Int>()
+        for (g in groups) {
+            val stockC = stock.temp[g.id] ?: g.detectedC
+            val raw = target.temp[g.id] ?: current.temp[g.id] ?: stockC
+            var w = raw.coerceIn(g.minC, g.maxC)
+            if (want.isNotEmpty() && w <= want.last()) w = want.last() + 1
+            if (w > g.maxC) { warn += "Hardware throttle limits: the steps must stay in ascending order, ignored"; return }
+            want += w
+        }
+        touched += groups.map { it.id }
+        val cur = groups.map { current.temp[it.id] }
+        fun op(i: Int) = WriteOp(groups[i].paths.first(), (want[i] * 1000).toString(), "${groups[i].label} hardware throttle")
+        val raise = groups.indices.filter { cur[it] == null || want[it] > cur[it]!! }.sortedDescending()
+        val lower = groups.indices.filter { cur[it] != null && want[it] < cur[it]!! }.sorted()
+        for (i in raise + lower) ops += op(i)
+        if (raise.isNotEmpty() || lower.isNotEmpty()) {
+            summary += "Hardware throttle limits: " + want.joinToString("/") + " \u00B0C"
+            val hot = groups.indices.filter { want[it] > (stock.temp[groups[it].id] ?: groups[it].detectedC) }
+            if (hot.isNotEmpty()) above += "Hardware throttle limits " + want.joinToString("/") + " \u00B0C (stock " +
+                groups.joinToString("/") { (stock.temp[it.id] ?: it.detectedC).toString() } + ") - hotter, more battery wear"
+        }
+        groups.forEachIndexed { i, g -> afterTemp[g.id] = want[i] }
+    }
+
     private fun ocSuffix(l: OcLevel) = when (l) {
         OcLevel.STOCK -> ""
         OcLevel.OVERCLOCK -> " - overclock"
@@ -170,6 +207,7 @@ object Planner {
         for ((id, want0) in target.temp) {
             val tgp = hw.tempGroups.firstOrNull { it.id == id }
             if (tgp == null) { warn += "Temperature limit $id is not available, ignored"; continue }
+            if (tgp.kind == TempKind.TMU) continue      // handled together below (ordering)
             touchedTemp += id
             val stockC = stock.temp[id] ?: tgp.detectedC
             // Trip points may only be made stricter than stock; the IPA target may go above stock (up to its range) in test mode.
@@ -178,11 +216,12 @@ object Planner {
             val now = current.temp[id]
             if (now != want) {
                 for (p in tgp.paths) ops += WriteOp(p, (if (tgp.milli) want * 1000 else want).toString(), "${tgp.label} temperature limit")
-                summary += "${tgp.label} temperature limit: $want °C"
-                if (want > stockC) above += "${tgp.label} temperature limit $want °C (stock $stockC)"
+                summary += "${tgp.label} temperature limit: $want \u00B0C"
+                if (want > stockC) above += "${tgp.label} temperature limit $want \u00B0C (stock $stockC)"
             }
             afterTemp[id] = want
         }
+        planTmu(hw, current, target, stock, ops, above, summary, warn, afterTemp, touchedTemp)
 
         for ((dev, s) in target.io) {
             val d = hw.blocks.firstOrNull { it.name == dev }

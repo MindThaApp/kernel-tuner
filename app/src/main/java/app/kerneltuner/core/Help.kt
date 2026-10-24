@@ -86,6 +86,25 @@ object Help {
             "The value is lost at restart. While it is applied, Kernel Tuner puts it back if something resets it.",
         "Safe default: stock (the far right). Lower it only if the phone gets too hot for you.",
     )
+    val tmu = Info(
+        "Hardware throttle limits",
+        "The five temperatures at which the chip itself is forced to slow down. Moving them up means hotter; down means cooler.",
+        "The processor has five built-in temperature steps (stock 75, 80, 85, 90 and 95 \u00B0C). Each step cuts speed harder. This control moves all five together by an offset, " +
+            "from 20 \u00B0C stricter to 10 \u00B0C looser, and the advanced section sets each one. The kernel keeps them in ascending order and inside that range.\n\n" +
+            "Looser than stock lets the chip get hotter before it is slowed: more heat, faster battery wear and a shorter chip life. It is treated like an overclock: it runs in test mode, " +
+            "is recorded by the crash marker, is never applied automatically after an unclean restart, and applies on boot only for a profile you tested and confirmed.\n\n" +
+            "It needs a kernel that makes these files writable; on other kernels the control says so and does nothing. Stricter than stock is always safe.",
+        "Safe default: stock (offset 0). Try +5 first, never leave it hot unattended.",
+    )
+    val thermalEngine = Info(
+        "Soft throttle (thermal service)",
+        "Where Android's thermal service starts slowing the processor. Later means faster for longer and a hotter phone.",
+        "Android has a thermal service (thermal-engine) that slows the processor early, based on skin-temperature readings. Its first rule starts at 43 \u00B0C on this phone. " +
+            "The thermal-relax module already moves it to 52 \u00B0C. This slider changes only that rule and the harder step above it, keeping their spacing; no other rule is touched.\n\n" +
+            "The range is 43 to 65 \u00B0C. A copy of the module's original file is kept, and \"Restore module default\" puts it back. The kernel's own limits (105 \u00B0C processor, 95 \u00B0C graphics) still apply, and the rule that protects the battery stays.\n\n" +
+            "Above the module default counts as above stock: it runs in test mode and, at every restart, the file is put back unless a confirmed profile applies it after the 90 s delay.",
+        "Safe default: the module default.",
+    )
     val presets = Info(
         "Quick presets",
         "One-tap starting points that stay inside the stock range.",

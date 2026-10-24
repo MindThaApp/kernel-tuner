@@ -282,9 +282,10 @@ fun ControlsScreen(vm: MainViewModel) {
             }
         }
 
-        if (hw.tempGroups.isNotEmpty()) {
+        val softGroups = hw.tempGroups.filter { it.kind == TempKind.IPA || it.kind == TempKind.TRIPS }
+        if (softGroups.isNotEmpty()) {
             Section("Temperature limit", "How warm the phone may get before it slows itself down.") {
-                hw.tempGroups.forEach { tg ->
+                softGroups.forEach { tg ->
                     val stockC = vm.stock?.temp?.get(tg.id) ?: tg.detectedC
                     val info = if (tg.kind == TempKind.IPA) Help.tempIpa else Help.tempTrips
                     val top = if (tg.kind == TempKind.TRIPS) minOf(tg.maxC, stockC) else tg.maxC
@@ -304,11 +305,69 @@ fun ControlsScreen(vm: MainViewModel) {
                     if (curT != null) ResetButton(enabled && curT != stockC) { vm.resetToStock(Settings(temp = mapOf(tg.id to stockC))) }
                 }
                 Text(
-                    if (hw.tempGroups.any { it.kind == TempKind.IPA })
+                    if (softGroups.any { it.kind == TempKind.IPA })
                         "Android's power manager changes this value when the power mode changes. Kernel Tuner puts your value back while it is applied."
                     else "Android's own thermal service may still slow the phone earlier than this limit. That is normal.",
                     style = MaterialTheme.typography.bodySmall,
                 )
+            }
+        }
+
+        val tmu = hw.tempGroups.filter { it.kind == TempKind.TMU }.sortedBy { it.order }
+        if (tmu.isNotEmpty()) {
+            Section("Hardware throttle limits", "The chip's own temperature steps where it is forced to slow down.") {
+                SettingHeader("What are these?", Help.tmu.subtitle, Help.tmu)
+                if (tmu.any { !it.writable }) {
+                    Text("Needs the updated kernel: these files are read-only on the kernel that is running now.", color = MaterialTheme.colorScheme.error)
+                }
+                val stocks = tmu.map { vm.stock?.temp?.get(it.id) ?: it.detectedC }
+                val vals = tmu.mapIndexed { i, g -> (d.temp[g.id] ?: vm.current.temp[g.id] ?: stocks[i]) }
+                val offset = (vals[0] - stocks[0]).coerceIn(-20, 10)
+                val hot = vals.indices.any { vals[it] > stocks[it] }
+                Text("All steps: " + (if (offset > 0) "+$offset" else "$offset") + " \u00B0C  (" + vals.joinToString(" / ") + " \u00B0C)",
+                    style = MaterialTheme.typography.titleSmall, color = if (hot) ocColor(OcLevel.OVERCLOCK) else MaterialTheme.colorScheme.onSurface)
+                Slider(
+                    enabled = tmu.all { it.writable },
+                    value = offset.toFloat(),
+                    onValueChange = { o ->
+                        val off = o.toInt().coerceIn(-20, 10)
+                        vm.draft = d.copy(temp = d.temp + tmu.mapIndexed { i, g -> g.id to (stocks[i] + off).coerceIn(g.minC, g.maxC) })
+                    },
+                    valueRange = -20f..10f, steps = 29,
+                )
+                if (hot) Text("Hotter than stock: the chip runs hotter before it is forced to slow down. More heat, faster battery wear and a shorter chip life. It is applied in test mode.",
+                    style = MaterialTheme.typography.bodySmall, color = ocColor(OcLevel.OVERCLOCK))
+                Collapsible("Advanced: each step", "Set the five steps one by one. They must stay in ascending order.") {
+                    tmu.forEachIndexed { i, g ->
+                        Text("${g.label}: ${vals[i]} \u00B0C (stock ${stocks[i]})", style = MaterialTheme.typography.titleSmall,
+                            color = if (vals[i] > stocks[i]) ocColor(OcLevel.OVERCLOCK) else MaterialTheme.colorScheme.onSurface)
+                        Slider(enabled = g.writable, value = vals[i].toFloat(), onValueChange = { vm.draft = d.copy(temp = d.temp + (g.id to it.toInt().coerceIn(g.minC, g.maxC))) },
+                            valueRange = g.minC.toFloat()..g.maxC.toFloat(), steps = g.maxC - g.minC - 1)
+                    }
+                }
+                val curAll = tmu.map { vm.current.temp[it.id] }
+                NowStock(curAll.joinToString("/") { it?.toString() ?: "?" } + " \u00B0C", stocks.joinToString("/") + " \u00B0C")
+                ResetButton(enabled && curAll.all { it != null } && curAll != stocks) { vm.resetToStock(Settings(temp = tmu.mapIndexed { i, g -> g.id to stocks[i] }.toMap())) }
+            }
+        }
+
+        hw.tempGroups.firstOrNull { it.kind == TempKind.THERMAL_ENGINE }?.let { tg ->
+            val stockC = vm.stock?.temp?.get(tg.id) ?: tg.detectedC
+            val value = (d.temp[tg.id] ?: vm.current.temp[tg.id] ?: stockC).coerceIn(tg.minC, tg.maxC)
+            Section("Soft throttle (Android thermal service)", "Where Android starts slowing the processor to keep the phone cool.") {
+                SettingHeader("What is this?", Help.thermalEngine.subtitle, Help.thermalEngine)
+                val warm = value > stockC
+                Text("Starts at $value \u00B0C" + (if (value == stockC) " (module default)" else if (warm) " (hotter than the module default)" else " (cooler than the module default)") + "; original Android value ${tg.minC} \u00B0C",
+                    style = MaterialTheme.typography.titleSmall, color = if (warm) ocColor(OcLevel.OVERCLOCK) else MaterialTheme.colorScheme.onSurface)
+                Slider(value = value.toFloat(), onValueChange = { vm.draft = d.copy(temp = d.temp + (tg.id to it.toInt().coerceIn(tg.minC, tg.maxC))) },
+                    valueRange = tg.minC.toFloat()..tg.maxC.toFloat(), steps = tg.maxC - tg.minC - 1)
+                val curT = vm.current.temp[tg.id]
+                NowStock(curT?.let { "$it \u00B0C" } ?: "?", "$stockC \u00B0C")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ResetButton(enabled && curT != null && curT != stockC) { vm.resetToStock(Settings(temp = mapOf(tg.id to stockC))) }
+                    OutlinedButton(enabled = enabled, onClick = { vm.restoreThermalDefault() }) { Text("Restore module default") }
+                }
+                Text("Takes effect right away (the thermal service restarts). It is undone at every restart unless a confirmed profile applies it on boot.", style = MaterialTheme.typography.bodySmall)
             }
         }
 

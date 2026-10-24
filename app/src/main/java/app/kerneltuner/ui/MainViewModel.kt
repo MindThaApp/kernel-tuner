@@ -26,6 +26,7 @@ import app.kerneltuner.hw.firstInt
 import app.kerneltuner.hw.readFirst
 import app.kerneltuner.sys.HwProbe
 import app.kerneltuner.sys.Reconcile
+import app.kerneltuner.sys.ThermalEngine
 import app.kerneltuner.core.Preset
 import app.kerneltuner.core.OcPolicy
 import app.kerneltuner.core.Presets
@@ -252,6 +253,15 @@ class MainViewModel(private val app: Application) : AndroidViewModel(app) {
     }
 
     fun isConfirmed(p: Profile) = p.confirmedSettings != null && p.confirmedSettings == p.settings
+
+    /** Puts the module's original thermal-engine file back and restarts the service. */
+    fun restoreThermalDefault() = viewModelScope.launch(Dispatchers.IO) {
+        busy = true
+        val err = ThermalEngine.restoreDefault()
+        reload()
+        message = err ?: "Thermal service rules restored to the module default."
+        busy = false
+    }
 
     fun reenableAutoApply() = viewModelScope.launch(Dispatchers.IO) { store.autoApplyDisabled = false; store.ocCrashStreak = 0; reload(); message = "Automatic applying is allowed again." }
 
