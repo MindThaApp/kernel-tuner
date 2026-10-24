@@ -13,7 +13,7 @@ object TempLimitDetector {
     const val GPU_TRIP_ID = "gpu_trip"
 
     const val IPA_MIN = 45
-    const val IPA_MAX = 75
+    const val IPA_MAX = 120
     const val CPU_TRIP_MIN = 70
     const val CPU_TRIP_STOCK = 105
     const val GPU_TRIP_MIN = 65
