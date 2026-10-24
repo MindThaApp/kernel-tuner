@@ -70,7 +70,8 @@ object Help {
         "How warm the phone may get before it slows itself down. Lower is cooler and slower; higher is faster for longer and hotter.",
         "This sets the temperature the phone tries to hold the processor and graphics at while you use it. Above it the phone reduces speed little by little.\n\n" +
             "Lowering it keeps the phone cooler and the battery happier at the cost of speed in long games. Raising it lets the phone stay fast longer but it gets hotter. " +
-            "The chip's own hard safety limits (which cut speed sharply or shut the phone down) stay in place whatever you choose.\n\n" +
+            "This value only shapes the gentle, gradual slowdown. Above roughly 95 \u00B0C it no longer matters: the kernel's own temperature trips (75, 80, 85, 90 and 95 \u00B0C) still slow the chip and protect it, whatever you set. " +
+            "The stock value is whatever the phone had when it started (some power modes use 120).\n\n" +
             "Android's power manager rewrites this value when it changes power mode (battery saver 45, normal 63, performance 65). Kernel Tuner puts your value back every few minutes while it is applied, " +
             "and within seconds while the app is open, but the value can briefly return to the system's choice in between. Applying a value above stock counts as an overclock and runs in test mode.",
         "Safe default: stock. Going lower is always safe.",

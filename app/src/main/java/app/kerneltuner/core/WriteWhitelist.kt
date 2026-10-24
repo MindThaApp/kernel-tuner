@@ -12,7 +12,7 @@ object WriteWhitelist {
 
     /** Absolute ceilings for temperature limits, whatever the stock value is. */
     const val IPA_MIN_C = 40
-    const val IPA_MAX_C = 80
+    const val IPA_MAX_C = 120
     const val TRIP_MIN_C = 50
     const val TRIP_MAX_C = 105   // the stock CPU trip; the GPU zone is held to 95 by the planner
 

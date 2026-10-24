@@ -241,8 +241,8 @@ class OcThermalTest {
     }
 
     @Test fun samsungIpaAboveStockIsFlaggedAndClamped() {
-        val p = Planner.plan(sam, samNow, Settings(temp = mapOf("ipa" to 120)), samNow)
-        assertEquals("75", p.ops.single().value)
+        val p = Planner.plan(sam, samNow, Settings(temp = mapOf("ipa" to 200)), samNow)
+        assertEquals("120", p.ops.single().value)
         assertEquals(1, p.aboveStock.size)
         val low = Planner.plan(sam, samNow, Settings(temp = mapOf("ipa" to 5)), samNow)
         assertEquals("45", low.ops.single().value)
@@ -299,7 +299,8 @@ class OcThermalTest {
         assertFalse(WriteWhitelist.allows("/sys/kernel/gpu/gpu_max_clock", "772"))
         assertFalse(WriteWhitelist.allows("/sys/kernel/gpu/gpu_min_clock", "266"))
         assertTrue(WriteWhitelist.allows("/sys/power/ipa/control_temp", "63"))
-        assertFalse(WriteWhitelist.allows("/sys/power/ipa/control_temp", "120"))
+        assertTrue(WriteWhitelist.allows("/sys/power/ipa/control_temp", "120"))
+        assertFalse(WriteWhitelist.allows("/sys/power/ipa/control_temp", "130"))
         assertFalse(WriteWhitelist.allows("/sys/power/ipa/tdp", "5000"))
         assertTrue(WriteWhitelist.allows("/sys/class/thermal/thermal_zone22/trip_point_0_temp", "85000"))
         assertFalse(WriteWhitelist.allows("/sys/class/thermal/thermal_zone22/trip_point_0_temp", "106000"))
@@ -364,5 +365,18 @@ class OcThermalTest {
         val s = json.decodeFromString(Settings.serializer(), """{"cpu":{},"gpu":{"maxMhz":700}}""")
         assertTrue(s.temp.isEmpty())
         assertNull(s.gpu!!.ceilingMhz)
+    }
+}
+
+class IpaStockTest {
+    @Test fun stockIsWhatWasReadEvenAt120() {
+        val fs = OcFixtures.samsungOc().plus(mapOf("/sys/power/ipa/control_temp" to "120"))
+        val hw = HardwareDetector.detect(fs)
+        val now = Snapshot.read(fs, hw)
+        assertEquals(120, now.temp["ipa"])
+        val p = Planner.plan(hw, now, Settings(temp = mapOf("ipa" to 100)), now)
+        assertEquals("100", p.ops.single().value)
+        assertTrue(p.aboveStock.isEmpty())
+        assertEquals("120", p.revertOps.single().value)
     }
 }
