@@ -28,8 +28,8 @@ object Help {
     val cpuMax = Info(
         "Maximum CPU speed",
         "The fastest the CPU may run. Lower saves battery and heat but games and heavy apps get slower.",
-        "This is a ceiling. Capping it is the easiest way to run cooler and last longer. The slider stops at the highest speed the chip is designed for, " +
-            "so it cannot overclock.",
+        "This is a ceiling. Capping it is the easiest way to run cooler and last longer. " +
+            "Steps above the stock maximum are marked \"Overclock\" and only exist on kernels built for it.",
         "Safe default: stock maximum. For battery, try one or two steps below it.",
     )
     val gpuGovernor = Info(
@@ -50,6 +50,51 @@ object Help {
         "A ceiling for graphics speed. Phones often throttle by themselves when the GPU gets hot, so a lower cap can give steadier frame rates in long games.",
         "Safe default: stock maximum.",
     )
+    val overclock = Info(
+        "Overclock steps",
+        "Speeds above what the phone shipped with. Faster, hotter, and may crash. Try them one step at a time.",
+        "Steps marked \"Overclock\" are above the stock maximum. They only appear on a kernel that was built to support them, and every chip is different: " +
+            "a step that works on one phone can freeze another.\n\n" +
+            "Steps marked \"likely unstable\" are the ones the kernel authors expect to fail on many chips, because the voltage they need is higher than the kernel allows.\n\n" +
+            "How to try one safely:\n" +
+            "1. Go up exactly one step from the last one that worked.\n" +
+            "2. Press \"Try for 3 min\", never plain Apply. Use the phone normally, or run a game or benchmark, while it counts down.\n" +
+            "3. If it still works when the time is up, you can try the next step.\n\n" +
+            "What a crash looks like: the screen freezes, the phone restarts by itself, or it shuts off. Nothing is lost: a restart always returns to stock, and the next start shows a red notice naming what was active. " +
+            "A frozen phone can be restarted by holding the power button for about ten seconds.\n\n" +
+            "It reverts by itself: when the test time ends everything goes back to stock unless you tap Keep. Overclocked values are always forced into test mode, and Apply on boot refuses a profile that crashed.",
+        "Tip: also check the Temperature limit below. A hotter limit plus an overclock is the fastest way to find a step's edge.",
+    )
+    val tempIpa = Info(
+        "Temperature limit",
+        "How warm the phone may get before it slows itself down. Lower is cooler and slower; higher is faster for longer and hotter.",
+        "This sets the temperature the phone tries to hold the processor and graphics at while you use it. Above it the phone reduces speed little by little.\n\n" +
+            "Lowering it keeps the phone cooler and the battery happier at the cost of speed in long games. Raising it lets the phone stay fast longer but it gets hotter. " +
+            "The chip's own hard safety limits (which cut speed sharply or shut the phone down) stay in place whatever you choose.\n\n" +
+            "Android's power manager rewrites this value when it changes power mode (battery saver 45, normal 63, performance 65). Kernel Tuner puts your value back every few minutes while it is applied, " +
+            "and within seconds while the app is open, but the value can briefly return to the system's choice in between. Applying a value above stock counts as an overclock and runs in test mode.",
+        "Safe default: stock. Going lower is always safe.",
+    )
+    val tempTrips = Info(
+        "Temperature limit",
+        "The temperature at which the kernel starts slowing the processor or graphics. Lower means it slows down earlier and stays cooler.",
+        "Your phone's kernel slows the chip when a sensor passes a set temperature (stock: processor 105 \u00B0C, graphics 95 \u00B0C). " +
+            "You can only make this stricter than stock: the slider never goes above the stock value, so it cannot let the phone run hotter than the factory limit.\n\n" +
+            "Note that Android also has its own thermal service (thermal-engine) which slows the phone earlier, at much lower temperatures, based on skin and battery temperature. " +
+            "That is separate and keeps working; a custom module can relax it, this app does not touch it.\n\n" +
+            "The value is lost at restart. While it is applied, Kernel Tuner puts it back if something resets it.",
+        "Safe default: stock (the far right). Lower it only if the phone gets too hot for you.",
+    )
+    val presets = Info(
+        "Quick presets",
+        "One-tap starting points that stay inside the stock range.",
+        "Presets fill in the controls below; nothing is applied until you press \"Try\".\n\n" +
+            "Battery saver: top speeds about 60% of stock and a cooler temperature limit.\n" +
+            "Balanced (stock): exactly what the phone had at boot.\n" +
+            "Performance: stock top speeds with a higher idle floor, for a snappier feel. It does not overclock and does not raise the temperature limit.",
+        "Safe default: Balanced.",
+    )
+
     val ioScheduler = Info(
         "Storage scheduler",
         "Decides the order storage reads and writes are done. Mostly affects app-loading smoothness.",

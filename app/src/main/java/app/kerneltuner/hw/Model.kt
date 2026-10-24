@@ -2,8 +2,10 @@ package app.kerneltuner.hw
 
 import kotlinx.serialization.Serializable
 
+@Serializable
 enum class CpuLayout { POLICY, PER_CPU }
 
+@Serializable
 data class CpuCluster(
     /** Stable key, "cpu<firstCpu>". */
     val id: String,
@@ -21,6 +23,12 @@ data class CpuCluster(
     val readPath: String get() = paths.first()
 }
 
+/** First readable value for [file] across the member directories (some cores may be offline). */
+fun CpuCluster.readFirst(fs: SysFs, file: String): String? {
+    for (p in paths) fs.read("$p/$file")?.let { return it }
+    return null
+}
+
 enum class GpuKind { KGSL, MALI }
 
 data class GpuFreq(val mhz: Int, val raw: Long)
@@ -32,10 +40,34 @@ data class GpuInfo(
     val freqs: List<GpuFreq>,
     val governors: List<String>,
     val model: String?,
+    /** Samsung OC kernel: root-only node that sets the governor ceiling (700 = stock, 772, 852). */
+    val limitPath: String? = null,
+    /** Adreno: kgsl max_pwrlevel (0 = fastest level). Lists every level, so index = position in the descending table. */
+    val pwrlevelPath: String? = null,
 ) {
     val minMhz get() = freqs.first().mhz
     val maxMhz get() = freqs.last().mhz
 }
+
+/** What a temperature-limit slider controls. */
+enum class TempKind { IPA, TRIPS }
+
+/**
+ * One temperature-limit control. IPA: a single node holding the power-budget target in whole degrees.
+ * TRIPS: the kernel's step_wise trip point 0 of several thermal zones, in millidegrees; only ever lowered.
+ */
+data class TempGroup(
+    val id: String,
+    val label: String,
+    val kind: TempKind,
+    val paths: List<String>,
+    val milli: Boolean,
+    /** Slider range in degrees C. maxC is also the hard ceiling the planner and the write whitelist enforce. */
+    val minC: Int,
+    val maxC: Int,
+    /** Value the kernel had when detected (used only when no boot snapshot exists). */
+    val detectedC: Int,
+)
 
 enum class ThermalCategory { CPU, GPU, BATTERY, OTHER }
 
@@ -62,6 +94,7 @@ data class Hardware(
     val blocks: List<BlockDevice>,
     val memItems: List<MemItem>,
     val cpuCount: Int,
+    val tempGroups: List<TempGroup> = emptyList(),
 )
 
 @Serializable

@@ -99,6 +99,7 @@ fun Profile.settingsSummary(): List<String> {
     val l = ArrayList<String>()
     for ((k, v) in settings.cpu) l += "$k: ${v.governor ?: ""} ${Fmt.khz(v.minKhz)} - ${Fmt.khz(v.maxKhz)}".trim()
     settings.gpu?.let { l += "GPU: ${it.governor ?: ""} ${Fmt.mhz(it.minMhz)} - ${Fmt.mhz(it.maxMhz)}".trim() }
+    for ((k, v) in settings.temp) l += "Temperature limit $k: $v °C"
     for ((k, v) in settings.io) l += "I/O $k: $v"
     for ((k, v) in settings.mem) l += "$k = $v"
     return l

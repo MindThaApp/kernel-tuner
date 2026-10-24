@@ -32,6 +32,11 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.kerneltuner.core.Info
+import app.kerneltuner.core.OcInfo
+import app.kerneltuner.core.OcLevel
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.SliderDefaults
+import androidx.compose.ui.graphics.Color
 
 @Composable
 fun Page(content: @Composable ColumnScope.() -> Unit) {
@@ -120,13 +125,36 @@ fun NowStock(now: String, stock: String?) {
     )
 }
 
+/** Warning colour for steps above stock: amber for overclock, red for "likely unstable". */
 @Composable
-fun FreqSlider(label: String, table: List<Int>, value: Int, fmt: (Int) -> String, onChange: (Int) -> Unit) {
+fun ocColor(level: OcLevel) = when (level) {
+    OcLevel.STOCK -> MaterialTheme.colorScheme.onSurface
+    OcLevel.OVERCLOCK -> if (isSystemInDarkTheme()) Color(0xFFFFB74D) else Color(0xFFB45F00)
+    OcLevel.UNSTABLE -> MaterialTheme.colorScheme.error
+}
+
+@Composable
+fun FreqSlider(
+    label: String,
+    table: List<Int>,
+    value: Int,
+    fmt: (Int) -> String,
+    level: (Int) -> OcLevel = { OcLevel.STOCK },
+    onChange: (Int) -> Unit,
+) {
     if (table.size < 2) { Text("$label: ${fmt(value)}"); return }
     val idx = table.indexOfFirst { it >= value }.let { if (it < 0) table.lastIndex else it }
-    Text("$label: ${fmt(table[idx])}", style = MaterialTheme.typography.titleSmall)
+    val lv = level(table[idx])
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("$label: ${fmt(table[idx])}", style = MaterialTheme.typography.titleSmall, color = ocColor(lv))
+        OcInfo.label(lv)?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = ocColor(lv), fontWeight = FontWeight.Bold) }
+    }
     Slider(
         value = idx.toFloat(), onValueChange = { onChange(table[it.toInt().coerceIn(0, table.lastIndex)]) },
         valueRange = 0f..table.lastIndex.toFloat(), steps = (table.size - 2).coerceAtLeast(0),
+        colors = SliderDefaults.colors(
+            thumbColor = if (lv == OcLevel.STOCK) MaterialTheme.colorScheme.primary else ocColor(lv),
+            activeTrackColor = if (lv == OcLevel.STOCK) MaterialTheme.colorScheme.primary else ocColor(lv),
+        ),
     )
 }

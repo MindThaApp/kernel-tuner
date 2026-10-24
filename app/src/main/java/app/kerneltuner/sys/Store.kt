@@ -2,6 +2,11 @@ package app.kerneltuner.sys
 
 import android.content.Context
 import app.kerneltuner.core.ActiveRecord
+import app.kerneltuner.core.ClusterSetting
+import app.kerneltuner.core.HeldState
+import app.kerneltuner.hw.CpuCluster
+import kotlinx.serialization.builtins.MapSerializer
+import kotlinx.serialization.builtins.serializer
 import app.kerneltuner.core.Profile
 import app.kerneltuner.core.Settings
 import app.kerneltuner.core.TestState
@@ -64,6 +69,21 @@ class Store(ctx: Context) {
     var stock: StockSnapshot?
         get() = get("stock") { json.decodeFromString(StockSnapshot.serializer(), it) }
         set(v) { sp.edit().apply { if (v == null) remove("stock") else putString("stock", json.encodeToString(StockSnapshot.serializer(), v)) }.commit() }
+
+    /** CPU and temperature limits the app keeps enforcing this boot (see Reconciler). */
+    var held: HeldState?
+        get() = get("held") { json.decodeFromString(HeldState.serializer(), it) }?.takeIf { it.bootId == bootId() }
+        set(v) { sp.edit().apply { if (v == null || v.settings.isEmpty) remove("held") else putString("held", json.encodeToString(HeldState.serializer(), v)) }.commit() }
+
+    /** Clusters seen in earlier detections: hotplugged-off cores hide their cpufreq files. */
+    var clusterCache: List<CpuCluster>
+        get() = get("cluster_cache") { json.decodeFromString(ListSerializer(CpuCluster.serializer()), it) } ?: emptyList()
+        set(v) { sp.edit().putString("cluster_cache", json.encodeToString(ListSerializer(CpuCluster.serializer()), v)).apply() }
+
+    /** Last known stock CPU limits per cluster, kept across reboots to fill in clusters that were offline at boot. */
+    var stockCpuCache: Map<String, ClusterSetting>
+        get() = get("stock_cpu_cache") { json.decodeFromString(MapSerializer(String.serializer(), ClusterSetting.serializer()), it) } ?: emptyMap()
+        set(v) { sp.edit().putString("stock_cpu_cache", json.encodeToString(MapSerializer(String.serializer(), ClusterSetting.serializer()), v)).apply() }
 
     var notice: Notice?
         get() = get("notice") { json.decodeFromString(Notice.serializer(), it) }

@@ -24,6 +24,13 @@ carried over.
 - **Dashboard**: per-core frequency, governor, GPU clock and load, temperatures, RAM/swap/zram. Polls only
   while the app is on screen.
 - **Controls**: CPU governor and min/max per cluster, GPU governor and min/max, I/O scheduler.
+- **Overclock steps** (0.3.0): steps above the stock maximum are marked "Overclock", the ones expected to be
+  unstable are flagged, and they always run in test mode. GPU ceilings: Samsung `gpu_max_clock_limit`
+  (OC kernels only), Adreno `max_pwrlevel`. Cores that are hotplugged off are skipped and re-applied when they return.
+- **Temperature limit** (0.3.0): Samsung IPA `control_temp`; step_wise trip points (CPU/GPU zones) that can only be
+  lowered below the stock trip. Stock shown, reset to stock, never applied on boot unless saved in a profile.
+- **Quick presets**: Battery saver / Balanced (stock) / Performance, stock-range values only.
+- Every write goes through a fixed whitelist of files and values.
 - **Memory values** (swappiness, dirty ratios, vfs_cache_pressure, zram, lmk props) are read-only by default;
   overriding is an explicit per-item opt-in with a warning. zram and lmk values are never writable.
 - **Profiles** with optional "apply on boot" (off by default, one boot profile at most). Everything reverts

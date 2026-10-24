@@ -3,7 +3,10 @@ package app.kerneltuner.sys
 import android.content.Context
 import app.kerneltuner.core.ActiveRecord
 import app.kerneltuner.core.Plan
+import app.kerneltuner.core.HeldState
 import app.kerneltuner.core.Planner
+import app.kerneltuner.core.Reconciler
+import app.kerneltuner.core.WriteWhitelist
 import app.kerneltuner.core.Snapshot
 import app.kerneltuner.hw.BlockDetector
 import app.kerneltuner.hw.GpuDetector
@@ -12,9 +15,11 @@ import app.kerneltuner.hw.SysFs
 import app.kerneltuner.hw.Verify
 import app.kerneltuner.hw.WriteOp
 
-data class ApplyResult(val ok: Boolean, val failed: List<String>)
+/** [skipped]: writes to cores that are offline right now. Not a failure; Reconcile applies them when the core returns. */
+data class ApplyResult(val ok: Boolean, val failed: List<String>, val skipped: List<String> = emptyList())
 
 object Applier {
+    private val OFFLINE_CPU = Regex("^/sys/devices/system/cpu/cpu(\\d+)/cpufreq/")
     private val SAFE_VALUE = Regex("^-?[A-Za-z0-9_.+\\-]{1,48}$")
     private val SAFE_PATH = Regex("^/(sys|proc)/[A-Za-z0-9_./:\\-@]+$")
 
@@ -25,24 +30,28 @@ object Applier {
         if (ops.isEmpty()) return ApplyResult(true, emptyList())
         if (!Root.available()) return ApplyResult(false, listOf("Root not available"))
         val failed = ArrayList<String>()
-        val script = ArrayList<String>()
+        val skipped = ArrayList<String>()
+        val todo = ArrayList<WriteOp>()
         for (op in ops) {
-            if (!SAFE_VALUE.matches(op.value) || !SAFE_PATH.matches(op.path)) {
+            if (!SAFE_VALUE.matches(op.value) || !SAFE_PATH.matches(op.path) || !WriteWhitelist.allows(op)) {
                 failed += "${op.label}: rejected unsafe path/value"
                 continue
             }
-            script += "echo ${q(op.value)} > ${q(op.path)} 2>/dev/null || echo FAIL"
+            // A core that is hotplugged off has no cpufreq directory: not an error.
+            val off = OFFLINE_CPU.find(op.path)
+            if (off != null && !fs.exists(op.path.substringBeforeLast('/'))) {
+                skipped += "CPU core ${off.groupValues[1]} is offline"
+                continue
+            }
+            todo += op
         }
-        // Run one op at a time so we know which one failed, in one shell session.
-        for ((i, line) in script.withIndex()) {
-            val out = Root.run(line)
-            if (out.any { it.contains("FAIL") }) failed += "write failed: " + line.substringAfter("> ").substringBefore(" 2>")
+        // One op at a time so we know which one failed.
+        for (op in todo) {
+            val out = Root.run("echo ${q(op.value)} > ${q(op.path)} 2>/dev/null || echo FAIL")
+            if (out.any { it.contains("FAIL") }) failed += "write failed: ${op.path}"
         }
-        for (op in ops) {
-            if (!SAFE_VALUE.matches(op.value) || !SAFE_PATH.matches(op.path)) continue
-            if (!verify(fs, op)) failed += "${op.label}: value did not stick"
-        }
-        return ApplyResult(failed.isEmpty(), failed.distinct())
+        for (op in todo) if (!verify(fs, op)) failed += "${op.label}: value did not stick"
+        return ApplyResult(failed.isEmpty(), failed.distinct(), skipped.distinct())
     }
 
     private fun verify(fs: SysFs, op: WriteOp): Boolean {
@@ -81,8 +90,13 @@ object Applier {
             atMs = System.currentTimeMillis(),
         )
         val r = write(fs, plan.ops)
+        // Remember CPU/temperature limits so they can be put back if the system resets them.
+        val prevHeld = store.held?.settings
+        val held = Reconciler.update(prevHeld, plan, plan.touchedCpu, plan.touchedTemp, stock)
+        store.held = HeldState(bootId, held)
         val diff = Planner.diffFromStock(stock, Snapshot.read(fs, hw))
-        if (diff.isEmpty()) store.active = null
+        if (diff.isEmpty() && held.isEmpty) store.active = null
+        if (!held.isEmpty) Reconcile.schedule(ctx) else Reconcile.cancel(ctx)
         return r
     }
 }

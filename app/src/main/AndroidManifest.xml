@@ -38,6 +38,7 @@
 
         <receiver android:name=".sys.TestRevertReceiver" android:exported="false" />
         <receiver android:name=".sys.StableReceiver" android:exported="false" />
+        <receiver android:name=".sys.ReconcileReceiver" android:exported="false" />
         <receiver android:name=".sys.NoticeActionReceiver" android:exported="false" />
     </application>
 </manifest>

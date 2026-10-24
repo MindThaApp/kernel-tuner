@@ -49,7 +49,7 @@ class NoticeActionReceiver : BroadcastReceiver() {
                 val store = Store(app)
                 val p = store.profiles().firstOrNull { it.id == id }
                 if (p != null) {
-                    val hw = HardwareDetector.detect(AppFs())
+                    val hw = HwProbe.detect(app, AppFs())
                     val (ns, notes) = StepDown.apply(hw, p.settings)
                     store.updateProfile(p.id) { it.copy(settings = ns, unstable = false, unstableReason = null, applyOnBoot = false) }
                     store.notice = null
