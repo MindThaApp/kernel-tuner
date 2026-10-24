@@ -34,6 +34,20 @@ class TestRevertReceiver : BroadcastReceiver() {
     }
 }
 
+/** Fires 90 s after boot for a confirmed overclock profile; re-checks everything before writing. */
+class BootApplyReceiver : BroadcastReceiver() {
+    override fun onReceive(ctx: Context, i: Intent) {
+        async { BootProcessor.runDelayedApply(ctx.applicationContext) }
+    }
+}
+
+/** An overclock stayed up long enough: the write-ahead marker is no longer needed. */
+class OcStableReceiver : BroadcastReceiver() {
+    override fun onReceive(ctx: Context, i: Intent) {
+        BootProcessor.onOcStable(ctx.applicationContext)
+    }
+}
+
 class StableReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, i: Intent) {
         BootProcessor.markStable(ctx.applicationContext)
@@ -57,6 +71,7 @@ class NoticeActionReceiver : BroadcastReceiver() {
                 }
                 Notifier.cancelUnclean(app)
             }
+            Notifier.ACTION_CANCEL_APPLY -> async { BootProcessor.cancelPendingApply(app) }
             Notifier.ACTION_DISMISS -> { Store(app).notice = null; Notifier.cancelUnclean(app) }
         }
     }

@@ -27,6 +27,7 @@ import app.kerneltuner.hw.readFirst
 import app.kerneltuner.sys.HwProbe
 import app.kerneltuner.sys.Reconcile
 import app.kerneltuner.core.Preset
+import app.kerneltuner.core.OcPolicy
 import app.kerneltuner.core.Presets
 import app.kerneltuner.sys.AppFs
 import app.kerneltuner.sys.Applier
@@ -81,6 +82,8 @@ class MainViewModel(private val app: Application) : AndroidViewModel(app) {
     var memText = mutableStateMapOf<String, String>()
     var activeRecord by mutableStateOf<app.kerneltuner.core.ActiveRecord?>(null); private set
     var nowMs by mutableStateOf(System.currentTimeMillis())
+    var unstableSteps by mutableStateOf<Set<String>>(emptySet()); private set
+    var autoDisabled by mutableStateOf(false); private set
 
     fun init() {
         viewModelScope.launch(Dispatchers.IO) {
@@ -117,6 +120,8 @@ class MainViewModel(private val app: Application) : AndroidViewModel(app) {
         notice = store.notice
         crashLog = store.crashLog()
         activeRecord = store.active
+        unstableSteps = store.unstableSteps
+        autoDisabled = store.autoApplyDisabled
         memValues = h.memItems.mapNotNull { m ->
             val v = if (m.path != null) fs.read(m.path) else readProp(m.prop!!)
             v?.let { m.key to it }
@@ -235,7 +240,22 @@ class MainViewModel(private val app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun keepTest() = viewModelScope.launch(Dispatchers.IO) { TestMode.keep(app); reload(); message = "Kept until next reboot." }
+    fun keepTest() = viewModelScope.launch(Dispatchers.IO) {
+        val confirmed = TestMode.keep(app); reload()
+        message = "Kept until next reboot." + if (confirmed) " This profile passed a full test and can now be set to apply on boot." else ""
+    }
+
+    /** True when applying [p] would go above stock. */
+    fun isOc(p: Profile): Boolean {
+        val h = hw ?: return false
+        return OcPolicy.isOc(h, p.settings, stockOrCurrent())
+    }
+
+    fun isConfirmed(p: Profile) = p.confirmedSettings != null && p.confirmedSettings == p.settings
+
+    fun reenableAutoApply() = viewModelScope.launch(Dispatchers.IO) { store.autoApplyDisabled = false; store.ocCrashStreak = 0; reload(); message = "Automatic applying is allowed again." }
+
+    fun forgetUnstableSteps() = viewModelScope.launch(Dispatchers.IO) { store.unstableSteps = emptySet(); reload() }
 
     fun revertTest() = viewModelScope.launch(Dispatchers.IO) { busy = true; TestMode.revert(app); reload(); message = "Reverted to stock."; busy = false }
 
@@ -281,6 +301,10 @@ class MainViewModel(private val app: Application) : AndroidViewModel(app) {
 
     fun setBoot(p: Profile, on: Boolean) {
         if (!on) { viewModelScope.launch(Dispatchers.IO) { store.setBootProfile(null); reload() }; return }
+        if (isOc(p) && !isConfirmed(p)) {
+            message = "This profile goes above stock. Press \"Try ${testMinutes} min\" on it, let the whole test run, then tap Keep. Only then can it apply on boot."
+            return
+        }
         val plan = planFor(p.settings)
         val extra = if (plan != null && plan.aboveStock.isNotEmpty()) "\n\nThis profile exceeds stock limits:\n" + plan.aboveStock.joinToString("\n") { "- $it" } else ""
         confirm = Confirm(

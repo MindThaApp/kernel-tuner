@@ -5,6 +5,11 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.SystemClock
+import app.kerneltuner.core.BootAction
+import app.kerneltuner.core.OcMarkerData
+import app.kerneltuner.core.OcPolicy
+import app.kerneltuner.core.OcSteps
+import app.kerneltuner.core.PendingApply
 import app.kerneltuner.core.BootClassifier
 import app.kerneltuner.core.BootGuard
 import app.kerneltuner.core.BootProps
@@ -18,6 +23,8 @@ import java.text.DateFormat
 import java.util.Date
 
 object BootProcessor {
+    const val ACTION_DELAYED = "app.kerneltuner.action.BOOT_DELAYED_APPLY"
+    const val ACTION_OC_STABLE = "app.kerneltuner.action.OC_STABLE"
     const val ACTION_STABLE = "app.kerneltuner.action.BOOT_STABLE"
     private const val STABLE_AFTER_MS = 5 * 60_000L
 
@@ -59,6 +66,7 @@ object BootProcessor {
         val prevActive = store.active
         val bootProfile = store.bootProfile()
         val markerPresent = prevBoot != null && store.markerBootId == prevBoot
+        val ocMarker = OcMarker.read(ctx)
 
         val needRoot = prevActive != null || (allowApply && bootProfile != null)
         val root = needRoot && Root.available()
@@ -66,6 +74,13 @@ object BootProcessor {
         val ev: CrashEvidence = if (files.isEmpty()) CrashEvidence(false, null, emptyList()) else CrashScanner.scan(files)
         val cls = BootClassifier.classify(markerPresent, bootProps(), ev)
         val verdict = if (prevBoot == null) Verdict.CLEAN else cls.verdict
+
+        // Overclock write-ahead marker still present = the previous boot ended with an overclock active.
+        val crashedOc = ocMarker != null && ocMarker.bootId != cur &&
+            OcPolicy.crashedWithMarker(true, markerPresent, verdict == Verdict.CLEAN)
+        val bootWall = System.currentTimeMillis() - SystemClock.elapsedRealtime()
+        val times = (store.bootTimes + bootWall).distinct()
+        val rapid = OcPolicy.rapidReboots(times, System.currentTimeMillis())
 
         val decision = BootGuard.decide(prevActive, verdict, bootProfile, store.unconfirmed, root)
 
@@ -75,6 +90,25 @@ object BootProcessor {
         store.active = null
         store.test = null
         if (verdict == Verdict.CLEAN) store.unconfirmed = 0
+        // Everything "held" is per boot: nothing carries over a reboot.
+        store.held = null
+        store.pendingApply = null
+        Reconcile.cancel(ctx)
+        Notifier.cancelPendingApply(ctx)
+        store.bootTimes = times
+        OcMarker.clear(ctx)
+        val streak = OcPolicy.nextStreak(store.ocCrashStreak, ocMarker != null, crashedOc, verdict == Verdict.CLEAN)
+        store.ocCrashStreak = streak
+        if (streak >= OcPolicy.STREAK_LIMIT) store.autoApplyDisabled = true
+        if (crashedOc) {
+            val steps = ocMarker!!.steps
+            store.unstableSteps = store.unstableSteps + steps
+            ocMarker.profileId?.let { id -> store.updateProfile(id) { it.copy(applyOnBoot = false, unstable = true, unstableReason = "an overclock crashed the phone") } }
+            Notifier.postInfo(ctx, OcPolicy.BLOCKED_TITLE,
+                "The phone restarted without a clean shutdown while an overclock was active (${steps.joinToString(", ")}). " +
+                    "Apply on boot is switched off for that profile and the step is marked unstable on this phone." +
+                    if (store.autoApplyDisabled) " Automatic applying is now off for everything." else "")
+        }
 
         if (prevActive != null && verdict == Verdict.UNCLEAN || decision.noticeSettings != null) {
             val tail = ev.tail
@@ -95,17 +129,100 @@ object BootProcessor {
             Notifier.postUnclean(ctx, n)
         }
 
-        val prof = decision.apply ?: return
+        val prof = decision.apply
+        if (prof == null) {
+            // Rapid reboots / disabled automatic applying still deserve a note when a boot profile exists.
+            if (bootProfile != null && (rapid || store.autoApplyDisabled) && decision.noticeSettings == null) {
+                Notifier.postInfo(ctx, OcPolicy.BLOCKED_TITLE,
+                    OcPolicy.decide(true, true, true, true, false, store.autoApplyDisabled, rapid, false).reason ?: "")
+            }
+            return
+        }
         if (!allowApply) return
         val fs = AppFs()
         val hw = HwProbe.detect(ctx, fs)
         val now = HwProbe.withStockCache(ctx, Snapshot.read(fs, hw))
         store.stock = StockSnapshot(cur, now)           // boot state before any of our writes is stock
-        store.unconfirmed = store.unconfirmed + 1
         val plan = Planner.plan(hw, now, prof.settings, now)
-        Applier.apply(ctx, fs, hw, plan, "BOOT", prof.id, now)
-        scheduleStable(ctx)
+        val oc = plan.aboveStock.isNotEmpty()
+        val d = OcPolicy.decide(
+            isOc = oc,
+            applyOnBoot = prof.applyOnBoot,
+            confirmedByTest = prof.confirmedSettings != null && prof.confirmedSettings == prof.settings,
+            previousShutdownClean = verdict == Verdict.CLEAN,
+            previousOcCrashed = crashedOc,
+            autoApplyDisabled = store.autoApplyDisabled,
+            rapidReboots = rapid,
+            hitsUnstableStep = OcSteps.of(hw, plan.after, now).any { it in store.unstableSteps },
+        )
+        when (d.action) {
+            BootAction.SKIP -> Notifier.postInfo(ctx, OcPolicy.BLOCKED_TITLE, "\"${prof.name}\": ${d.reason}")
+            BootAction.APPLY_NOW -> {
+                store.unconfirmed = store.unconfirmed + 1
+                Applier.apply(ctx, fs, hw, plan, "BOOT", prof.id, now)
+                scheduleStable(ctx)
+            }
+            BootAction.APPLY_DELAYED -> {
+                val due = System.currentTimeMillis() + OcPolicy.DELAY_MS
+                store.pendingApply = PendingApply(cur, prof.id, due)
+                scheduleDelayed(ctx)
+                Notifier.postPendingApply(ctx, (OcPolicy.DELAY_MS / 1000).toInt(), prof.name)
+            }
+        }
     }
+
+    private fun delayedPi(ctx: Context) = PendingIntent.getBroadcast(
+        ctx, 4, Intent(ctx, BootApplyReceiver::class.java).setAction(ACTION_DELAYED),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+    )
+
+    private fun scheduleDelayed(ctx: Context) {
+        val am = ctx.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        am.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME, SystemClock.elapsedRealtime() + OcPolicy.DELAY_MS, delayedPi(ctx))
+    }
+
+    fun cancelPendingApply(ctx: Context) {
+        (ctx.getSystemService(Context.ALARM_SERVICE) as AlarmManager).cancel(delayedPi(ctx))
+        Store(ctx).pendingApply = null
+        Notifier.cancelPendingApply(ctx)
+    }
+
+    /** The 90 s alarm. Re-checks everything: a changed profile, a disabled switch or a new crash all cancel it. */
+    @Synchronized
+    fun runDelayedApply(ctx: Context) {
+        val store = Store(ctx)
+        val pending = store.pendingApply
+        store.pendingApply = null
+        Notifier.cancelPendingApply(ctx)
+        if (pending == null || pending.bootId != store.bootId()) return
+        if (System.currentTimeMillis() < pending.dueWallMs - 5_000) return        // alarm fired early / clock jump: do nothing
+        val prof = store.profiles().firstOrNull { it.id == pending.profileId } ?: return
+        if (!prof.applyOnBoot || prof.unstable || store.autoApplyDisabled) return
+        if (prof.confirmedSettings == null || prof.confirmedSettings != prof.settings) return
+        if (!Root.available()) return
+        val fs = AppFs()
+        val hw = HwProbe.detect(ctx, fs)
+        val stock = store.stock?.takeIf { it.bootId == pending.bootId }?.settings ?: return
+        val now = Snapshot.read(fs, hw)
+        val plan = Planner.plan(hw, now, prof.settings, stock)
+        if (OcSteps.of(hw, plan.after, stock).any { it in store.unstableSteps }) return
+        store.unconfirmed = store.unconfirmed + 1
+        Applier.apply(ctx, fs, hw, plan, "BOOT", prof.id, stock)
+        scheduleStable(ctx)
+        scheduleOcStable(ctx)
+    }
+
+    private fun ocStablePi(ctx: Context) = PendingIntent.getBroadcast(
+        ctx, 5, Intent(ctx, OcStableReceiver::class.java).setAction(ACTION_OC_STABLE),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+    )
+
+    fun scheduleOcStable(ctx: Context) {
+        val am = ctx.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        am.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME, SystemClock.elapsedRealtime() + OcPolicy.STABLE_MS, ocStablePi(ctx))
+    }
+
+    fun onOcStable(ctx: Context) { OcMarker.clear(ctx) }
 
     private fun stablePi(ctx: Context) = PendingIntent.getBroadcast(
         ctx, 2, Intent(ctx, StableReceiver::class.java).setAction(ACTION_STABLE),

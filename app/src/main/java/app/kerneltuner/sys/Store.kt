@@ -4,6 +4,7 @@ import android.content.Context
 import app.kerneltuner.core.ActiveRecord
 import app.kerneltuner.core.ClusterSetting
 import app.kerneltuner.core.HeldState
+import app.kerneltuner.core.PendingApply
 import app.kerneltuner.hw.CpuCluster
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
@@ -84,6 +85,30 @@ class Store(ctx: Context) {
     var stockCpuCache: Map<String, ClusterSetting>
         get() = get("stock_cpu_cache") { json.decodeFromString(MapSerializer(String.serializer(), ClusterSetting.serializer()), it) } ?: emptyMap()
         set(v) { sp.edit().putString("stock_cpu_cache", json.encodeToString(MapSerializer(String.serializer(), ClusterSetting.serializer()), v)).apply() }
+
+    /** Steps ("cpu:cpu4:2400000", "gpu:852") that crashed this phone. Never cleared by itself. */
+    var unstableSteps: Set<String>
+        get() = sp.getStringSet("unstable_steps", emptySet()) ?: emptySet()
+        set(v) { sp.edit().putStringSet("unstable_steps", v).commit() }
+
+    /** Consecutive boots that ended in a crash with an overclock active. */
+    var ocCrashStreak: Int
+        get() = sp.getInt("oc_streak", 0)
+        set(v) { sp.edit().putInt("oc_streak", v).commit() }
+
+    /** Set after two such crashes in a row: no automatic applying of anything until the user re-enables it. */
+    var autoApplyDisabled: Boolean
+        get() = sp.getBoolean("auto_disabled", false)
+        set(v) { sp.edit().putBoolean("auto_disabled", v).commit() }
+
+    /** Wall-clock moments of the last boots (newest last). */
+    var bootTimes: List<Long>
+        get() = (sp.getString("boot_times", "") ?: "").split(',').mapNotNull { it.toLongOrNull() }
+        set(v) { sp.edit().putString("boot_times", v.takeLast(10).joinToString(",")).commit() }
+
+    var pendingApply: PendingApply?
+        get() = get("pending_apply") { json.decodeFromString(PendingApply.serializer(), it) }
+        set(v) { sp.edit().apply { if (v == null) remove("pending_apply") else putString("pending_apply", json.encodeToString(PendingApply.serializer(), v)) }.commit() }
 
     var notice: Notice?
         get() = get("notice") { json.decodeFromString(Notice.serializer(), it) }
