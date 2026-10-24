@@ -36,6 +36,13 @@ object Applier {
         val skipped = ArrayList<String>()
         val todo = ArrayList<WriteOp>()
         for (op in ops) {
+            if (op.path == WriteWhitelist.THERMAL_CONF) {
+                // Not a sysfs echo: a checked rewrite of two lines in the module's conf.
+                val n = op.value.toIntOrNull()
+                if (n == null || !WriteWhitelist.allows(op)) { failed += "${op.label}: rejected unsafe path/value"; continue }
+                ThermalEngine.set(n)?.let { failed += "${op.label}: $it" }
+                continue
+            }
             if (!SAFE_VALUE.matches(op.value) || !SAFE_PATH.matches(op.path) || !WriteWhitelist.allows(op)) {
                 failed += "${op.label}: rejected unsafe path/value"
                 continue
@@ -98,6 +105,7 @@ object Applier {
             val old = OcMarker.read(ctx)?.takeIf { it.bootId == bootId }
             OcMarker.write(ctx, OcMarkerData(bootId, profileId ?: old?.profileId, ((old?.steps ?: emptyList()) + ocSteps).distinct(), System.currentTimeMillis()))
         }
+        if (plan.ops.any { it.path == WriteWhitelist.THERMAL_CONF }) store.thermalEngineTouched = true
         val r = write(fs, plan.ops)
         // Remember CPU/temperature limits so they can be put back if the system resets them.
         val prevHeld = store.held?.settings

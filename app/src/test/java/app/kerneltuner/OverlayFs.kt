@@ -31,6 +31,9 @@ class OverlayFs(
         return files.entries.any { it.value != null && it.key.startsWith("$path/") } || base.exists(path)
     }
 
+    /** Test hook: key "<path>#rw" = "1" for an owner-writable file, "0" for read-only. */
+    override fun ownerWritable(path: String): Boolean? = files["$path#rw"]?.let { it == "1" } ?: base.ownerWritable(path)
+
     fun plus(more: Map<String, String?>, removed: Set<String> = emptySet()) = OverlayFs(base, files + more, removedDirs + removed)
 }
 
@@ -69,4 +72,21 @@ object OcFixtures {
         m["/sys/class/thermal/thermal_zone30/trip_point_0_temp"] = "95000"
         return OverlayFs(Fixtures.fs("moto"), m)
     }
+}
+
+object TripFixtures {
+    fun samsungTrips(writable: Boolean, values: List<Int> = listOf(75, 80, 85, 90, 95)): OverlayFs {
+        val m = HashMap<String, String?>()
+        for ((i, v) in values.withIndex()) {
+            val p = "/sys/class/thermal/thermal_zone0/trip_point_${i}_temp"
+            m[p] = (v * 1000).toString(); m["$p#rw"] = if (writable) "1" else "0"
+        }
+        m["/sys/class/thermal/thermal_zone0/type"] = "exynos-therm"
+        return OcFixtures.samsungOc().plus(m)
+    }
+
+    val conf: String get() = TripFixtures::class.java.getResource("/conf/thermal-engine-relax.conf")!!.readText()
+
+    fun motoWithConf(text: String = conf): OverlayFs =
+        OcFixtures.motoOc().plus(mapOf("/data/adb/modules/sanders_oc_thermal_relax/system/vendor/etc/thermal-engine.conf" to text))
 }

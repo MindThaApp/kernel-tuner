@@ -95,6 +95,7 @@ object BootProcessor {
         store.pendingApply = null
         Reconcile.cancel(ctx)
         Notifier.cancelPendingApply(ctx)
+        if (store.thermalEngineTouched && Root.available()) ThermalEngine.restoreIfModified(ctx)
         store.bootTimes = times
         OcMarker.clear(ctx)
         val streak = OcPolicy.nextStreak(store.ocCrashStreak, ocMarker != null, crashedOc, verdict == Verdict.CLEAN)

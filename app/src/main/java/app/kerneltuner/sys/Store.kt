@@ -110,6 +110,11 @@ class Store(ctx: Context) {
         get() = get("pending_apply") { json.decodeFromString(PendingApply.serializer(), it) }
         set(v) { sp.edit().apply { if (v == null) remove("pending_apply") else putString("pending_apply", json.encodeToString(PendingApply.serializer(), v)) }.commit() }
 
+    /** True once the app has edited the thermal-engine conf, so boot knows to put it back. */
+    var thermalEngineTouched: Boolean
+        get() = sp.getBoolean("te_touched", false)
+        set(v) { sp.edit().putBoolean("te_touched", v).commit() }
+
     var notice: Notice?
         get() = get("notice") { json.decodeFromString(Notice.serializer(), it) }
         set(v) { sp.edit().apply { if (v == null) remove("notice") else putString("notice", json.encodeToString(Notice.serializer(), v)) }.commit() }

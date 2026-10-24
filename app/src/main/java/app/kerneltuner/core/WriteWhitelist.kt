@@ -8,6 +8,7 @@ import app.kerneltuner.hw.WriteOp
  */
 object WriteWhitelist {
     const val GPU_LIMIT_NODE = "/sys/kernel/gpu/gpu_max_clock_limit"
+    const val THERMAL_CONF = "/data/adb/modules/sanders_oc_thermal_relax/system/vendor/etc/thermal-engine.conf"
     const val IPA_CONTROL_TEMP = "/sys/power/ipa/control_temp"
 
     /** Absolute ceilings for temperature limits, whatever the stock value is. */
@@ -42,6 +43,10 @@ object WriteWhitelist {
         Entry(Regex("^" + Regex.escape(IPA_CONTROL_TEMP) + "$"), num(IPA_MIN_C.toLong(), IPA_MAX_C.toLong())),
         // Moto: step_wise trip point 0 only, millidegrees, never above the stock CPU trip
         Entry(Regex("^/sys/class/thermal/thermal_zone\\d{1,3}/trip_point_0_temp$"), num(TRIP_MIN_C * 1000L, TRIP_MAX_C * 1000L)),
+        // Samsung TMU trips 1..4 (trip 0 is covered above): stock-20 .. stock+10, so 55..105 C overall
+        Entry(Regex("^/sys/class/thermal/thermal_zone0/trip_point_[1-4]_temp$"), num(55_000, 105_000)),
+        // Moto: first thermal-engine rule inside the module's overlay, whole degrees 43..65. Written by ThermalEngine, not by echo.
+        Entry(Regex("^" + Regex.escape(THERMAL_CONF) + "$"), num(ThermalConf.MIN_C.toLong(), ThermalConf.MAX_C.toLong())),
         // Storage scheduler and the four plain vm sysctls
         Entry(Regex("^/sys/block/[A-Za-z0-9_\\-]{1,24}/queue/scheduler$")) { NAME.matches(it) },
         Entry(Regex("^/proc/sys/vm/(swappiness|dirty_ratio|dirty_background_ratio|vfs_cache_pressure)$"), num(0, 1000)),

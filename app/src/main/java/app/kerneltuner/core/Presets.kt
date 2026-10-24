@@ -55,6 +55,7 @@ object Presets {
             val lower = when (g.kind) {
                 TempKind.IPA -> stockC - 10
                 TempKind.TRIPS -> stockC - 20
+                TempKind.TMU, TempKind.THERMAL_ENGINE -> stockC
             }
             temp[g.id] = if (battery) lower.coerceIn(g.minC, stockC) else stockC
         }

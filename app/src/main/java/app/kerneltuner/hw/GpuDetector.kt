@@ -24,7 +24,7 @@ object GpuDetector {
             val (govs, _) = parseMaliGovernors(fs.read("$p/dvfs_governor"))
             // OC kernel: a root-only node raises the governor ceiling. The dvfs_table does not list the new top step.
             val limit = WriteWhitelistPaths.GPU_LIMIT.takeIf { fs.exists(it) }
-            val full = if (limit != null) (table + OcSteps.MALI).distinct().sorted() else table
+            val full = if (limit != null) (table + MaliOcSteps.MALI).distinct().sorted() else table
             return GpuInfo(GpuKind.MALI, p, full.map { GpuFreq(it, it.toLong()) }, govs, fs.read("$p/gpuinfo"), limitPath = limit)
         }
         return null
@@ -97,6 +97,6 @@ internal object WriteWhitelistPaths {
     const val GPU_LIMIT = "/sys/kernel/gpu/gpu_max_clock_limit"
 }
 
-internal object OcSteps {
+internal object MaliOcSteps {
     val MALI = listOf(852)
 }
