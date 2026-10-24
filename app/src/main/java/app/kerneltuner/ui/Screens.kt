@@ -250,7 +250,7 @@ fun ControlsScreen(vm: MainViewModel) {
                 NowStock(Fmt.khz(cur?.minKhz), stock?.minKhz?.let { Fmt.khz(it) })
 
                 SettingHeader("Maximum speed", Help.cpuMax.subtitle, Help.cpuMax)
-                FreqSlider("Max", c.freqs, cs.maxKhz ?: c.hwMaxKhz, { Fmt.khz(it) }, { OcInfo.cpuLevel(c, it, stock?.maxKhz) }) { vm.draft = d.copy(cpu = d.cpu + (c.id to cs.copy(maxKhz = it))) }
+                FreqSlider("Max", c.freqs, cs.maxKhz ?: c.hwMaxKhz, { Fmt.khz(it) }, { OcInfo.cpuLevel(c, it, stock?.maxKhz) }, { "cpu:${c.id}:$it" in vm.unstableSteps }) { vm.draft = d.copy(cpu = d.cpu + (c.id to cs.copy(maxKhz = it))) }
                 NowStock(Fmt.khz(cur?.maxKhz), stock?.maxKhz?.let { Fmt.khz(it) })
 
                 if (stock != null) ResetButton(enabled && cur != null && cur != stock) { vm.resetToStock(Settings(cpu = mapOf(c.id to stock))) }
@@ -275,7 +275,7 @@ fun ControlsScreen(vm: MainViewModel) {
                 NowStock(Fmt.mhz(cur?.minMhz), stock?.minMhz?.let { Fmt.mhz(it) })
 
                 SettingHeader("Maximum speed", Help.gpuMax.subtitle, Help.gpuMax)
-                FreqSlider("Max", table, gs.maxMhz ?: g.maxMhz, { Fmt.mhz(it) }, { OcInfo.gpuLevel(g, it, stock?.maxMhz) }) { vm.draft = d.copy(gpu = gs.copy(maxMhz = it)) }
+                FreqSlider("Max", table, gs.maxMhz ?: g.maxMhz, { Fmt.mhz(it) }, { OcInfo.gpuLevel(g, it, stock?.maxMhz) }, { "gpu:$it" in vm.unstableSteps }) { vm.draft = d.copy(gpu = gs.copy(maxMhz = it)) }
                 NowStock(Fmt.mhz(cur?.maxMhz), stock?.maxMhz?.let { Fmt.mhz(it) })
 
                 if (stock != null) ResetButton(enabled && cur != null && cur != stock) { vm.resetToStock(Settings(gpu = stock)) }
@@ -432,6 +432,12 @@ private fun ProfileCard(vm: MainViewModel, p: Profile) {
                 OutlinedButton(onClick = { vm.clearUnstable(p) }) { Text("Mark stable") }
             }
         }
+        val oc = vm.isOc(p)
+        if (oc) Text(
+            if (vm.isConfirmed(p)) "Goes above stock. Passed a full test and was confirmed with Keep. When it applies on boot it waits 90 s and shows a Cancel notification."
+            else "Goes above stock. To allow apply on boot: press \"Try ${vm.testMinutes} min\" on this profile, let the whole test run, then tap Keep. Changing the profile resets this.",
+            style = MaterialTheme.typography.bodySmall, color = ocColor(OcLevel.OVERCLOCK),
+        )
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("Apply on boot")
@@ -491,6 +497,21 @@ fun SafetyScreen(vm: MainViewModel) {
             )
         }
         Section("Apply on boot", Help.applyOnBoot.subtitle) { InfoRow(Help.applyOnBoot) }
+        Section("Boot loop? How to get out", "Works without a PC.") {
+            Text(
+                "1. Nothing above stock is ever applied automatically unless you enabled Apply on boot for a profile that passed a full test and was confirmed with Keep. Even then it waits 90 s after boot and shows a Cancel notification.\n" +
+                    "2. If the phone restarts 2 or more times within 5 minutes, Kernel Tuner applies nothing for that boot.\n" +
+                    "3. If an overclock is active when the phone crashes, that profile's Apply on boot is switched off and the step is marked as crashed. Two crashes in a row switch off all automatic applying.\n" +
+                    "4. Safe mode blocks the app completely: hold Volume Down while the phone boots (as soon as the logo or animation appears) until it says Safe mode, then uninstall or open Kernel Tuner's settings.",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            StatusRow("Automatic applying", if (vm.autoDisabled) "Switched off after repeated crashes with an overclock." else "Allowed (only for profiles you confirmed).", !vm.autoDisabled)
+            if (vm.autoDisabled) OutlinedButton(onClick = { vm.reenableAutoApply() }) { Text("Allow automatic applying again") }
+            if (vm.unstableSteps.isNotEmpty()) {
+                StatusRow("Steps that crashed this phone", vm.unstableSteps.sorted().joinToString("\n"), false)
+                OutlinedButton(onClick = { vm.forgetUnstableSteps() }) { Text("Forget these") }
+            }
+        }
         Section("Last crash log") {
             val l = vm.crashLog
             if (l == null) Text("None recorded.") else {

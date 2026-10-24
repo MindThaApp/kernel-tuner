@@ -4,6 +4,9 @@ import android.content.Context
 import app.kerneltuner.core.ActiveRecord
 import app.kerneltuner.core.Plan
 import app.kerneltuner.core.HeldState
+import app.kerneltuner.core.OcMarkerData
+import app.kerneltuner.core.OcPolicy
+import app.kerneltuner.core.OcSteps
 import app.kerneltuner.core.Planner
 import app.kerneltuner.core.Reconciler
 import app.kerneltuner.core.WriteWhitelist
@@ -89,14 +92,27 @@ object Applier {
             summary = ((prevSame?.summary ?: emptyList()) + plan.summary).distinct(),
             atMs = System.currentTimeMillis(),
         )
+        // Write-ahead: the "overclock being applied" marker is on disk (fsynced) before the first above-stock write.
+        val ocSteps = OcSteps.of(hw, plan.after, stock)
+        if (ocSteps.isNotEmpty()) {
+            val old = OcMarker.read(ctx)?.takeIf { it.bootId == bootId }
+            OcMarker.write(ctx, OcMarkerData(bootId, profileId ?: old?.profileId, ((old?.steps ?: emptyList()) + ocSteps).distinct(), System.currentTimeMillis()))
+        }
         val r = write(fs, plan.ops)
         // Remember CPU/temperature limits so they can be put back if the system resets them.
         val prevHeld = store.held?.settings
         val held = Reconciler.update(prevHeld, plan, plan.touchedCpu, plan.touchedTemp, stock)
-        store.held = HeldState(bootId, held)
-        val diff = Planner.diffFromStock(stock, Snapshot.read(fs, hw))
+        if (OcPolicy.persistAsHeld(kind)) {
+            store.held = HeldState(bootId, held)
+            if (!held.isEmpty) Reconcile.schedule(ctx) else Reconcile.cancel(ctx)
+        } else {
+            // Test mode: never held. Promoted only if the user taps Keep.
+            store.test = store.test?.copy(pendingHeld = held)
+        }
+        val now = Snapshot.read(fs, hw)
+        val diff = Planner.diffFromStock(stock, now)
+        if (OcSteps.of(hw, now, stock).isEmpty()) OcMarker.clear(ctx)
         if (diff.isEmpty() && held.isEmpty) store.active = null
-        if (!held.isEmpty) Reconcile.schedule(ctx) else Reconcile.cancel(ctx)
         return r
     }
 }

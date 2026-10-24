@@ -40,6 +40,8 @@ data class Profile(
     val applyOnBoot: Boolean = false,
     val unstable: Boolean = false,
     val unstableReason: String? = null,
+    /** The exact settings that passed a full test run and were confirmed with Keep. Required for an overclock to apply on boot. */
+    val confirmedSettings: Settings? = null,
 )
 
 /** Write-ahead record: something non-stock is (about to be) active in this boot. */
@@ -59,6 +61,11 @@ data class TestState(
     val deadlineWallMs: Long,
     val revertOps: List<app.kerneltuner.hw.WriteOp>,
     val summary: List<String>,
+    val profileId: String? = null,
+    val startedWallMs: Long = 0,
+    val durationMs: Long = 0,
+    /** Limits to enforce if (and only if) the user taps Keep. Not held while the test runs. */
+    val pendingHeld: Settings? = null,
 )
 
 /** What the app keeps enforcing this boot (CPU limits and temperature limits), see Reconciler. */

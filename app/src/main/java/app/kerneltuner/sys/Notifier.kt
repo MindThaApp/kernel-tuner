@@ -12,6 +12,7 @@ import app.kerneltuner.ui.MainActivity
 
 object Notifier {
     const val ACTION_STEP_DOWN = "app.kerneltuner.action.STEP_DOWN"
+    const val ACTION_CANCEL_APPLY = "app.kerneltuner.action.CANCEL_APPLY"
     const val ACTION_DISMISS = "app.kerneltuner.action.DISMISS_NOTICE"
     private const val CHANNEL = "stability"
     private const val ID_UNCLEAN = 100
@@ -54,6 +55,21 @@ object Notifier {
         m.notify(101, Notification.Builder(ctx, CHANNEL).setSmallIcon(android.R.drawable.stat_sys_warning)
             .setContentTitle(title).setContentText(text).setStyle(Notification.BigTextStyle().bigText(text))
             .setContentIntent(open(ctx)).setAutoCancel(true).build())
+    }
+
+    private const val ID_PENDING = 102
+
+    fun postPendingApply(ctx: Context, seconds: Int, profileName: String) {
+        val m = nm(ctx) ?: return
+        m.notify(ID_PENDING, Notification.Builder(ctx, CHANNEL).setSmallIcon(android.R.drawable.stat_sys_warning)
+            .setContentTitle("Applying overclock in $seconds s")
+            .setContentText("Profile \"$profileName\". Tap Cancel to skip it for this boot.")
+            .setContentIntent(open(ctx)).setOngoing(true)
+            .addAction(Notification.Action.Builder(null, "Cancel", action(ctx, ACTION_CANCEL_APPLY, null, 13)).build()).build())
+    }
+
+    fun cancelPendingApply(ctx: Context) {
+        (ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(ID_PENDING)
     }
 
     fun cancelUnclean(ctx: Context) {

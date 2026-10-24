@@ -140,14 +140,17 @@ fun FreqSlider(
     value: Int,
     fmt: (Int) -> String,
     level: (Int) -> OcLevel = { OcLevel.STOCK },
+    crashed: (Int) -> Boolean = { false },
     onChange: (Int) -> Unit,
 ) {
     if (table.size < 2) { Text("$label: ${fmt(value)}"); return }
     val idx = table.indexOfFirst { it >= value }.let { if (it < 0) table.lastIndex else it }
-    val lv = level(table[idx])
+    val bad = crashed(table[idx])
+    val lv = if (bad) OcLevel.UNSTABLE else level(table[idx])
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("$label: ${fmt(table[idx])}", style = MaterialTheme.typography.titleSmall, color = ocColor(lv))
-        OcInfo.label(lv)?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = ocColor(lv), fontWeight = FontWeight.Bold) }
+        if (bad) Text("Crashed this phone before", style = MaterialTheme.typography.labelMedium, color = ocColor(lv), fontWeight = FontWeight.Bold)
+        else OcInfo.label(lv)?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = ocColor(lv), fontWeight = FontWeight.Bold) }
     }
     Slider(
         value = idx.toFloat(), onValueChange = { onChange(table[it.toInt().coerceIn(0, table.lastIndex)]) },
